@@ -2,7 +2,7 @@ package io.github.matthewjones372.lark.bank
 
 import arrow.core.Either
 import arrow.core.right
-import io.github.matthewjones372.lark.actor.Full
+import io.github.matthewjones372.lark.actor.NotSent
 import io.github.matthewjones372.lark.actor.journal.jdbc.JdbcJournal
 import io.github.matthewjones372.lark.actor.remote.Node
 import io.github.matthewjones372.lark.cluster.Discovery
@@ -57,7 +57,7 @@ class CrashTest {
 
             // One sender per node, all at once, so each node has work in flight when n3 goes halfway through its share.
             val halfway = CountDownLatch(1)
-            val sent = ConcurrentLinkedQueue<Either<Full, Unit>>()
+            val sent = ConcurrentLinkedQueue<Either<NotSent, Unit>>()
             val senders = nodes.mapIndexed { n, node ->
                 Thread.ofPlatform().start {
                     transfers.filterIndexed { i, _ -> i % 3 == n }.forEachIndexed { i, (id, fromTo, pence) ->

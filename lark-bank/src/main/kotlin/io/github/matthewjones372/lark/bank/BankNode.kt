@@ -3,8 +3,8 @@ package io.github.matthewjones372.lark.bank
 import arrow.core.Either
 import io.github.matthewjones372.lark.actor.ActorRef
 import io.github.matthewjones372.lark.actor.AskFailure
-import io.github.matthewjones372.lark.actor.Full
 import io.github.matthewjones372.lark.actor.Journal
+import io.github.matthewjones372.lark.actor.NotSent
 import io.github.matthewjones372.lark.actor.Producer
 import io.github.matthewjones372.lark.actor.ask
 import io.github.matthewjones372.lark.actor.journal
@@ -149,7 +149,7 @@ internal class BankNode(
         parts.accounts.entity(account).ask(ASK) { Balance(it) }
 
     /** Starts the transfer [id] once its start is kept in this node's journal: from then on no crash loses it. */
-    fun transfer(id: String, from: String, to: String, pence: Long): Either<Full, Unit> {
+    fun transfer(id: String, from: String, to: String, pence: Long): Either<NotSent, Unit> {
         val at = System.currentTimeMillis()
         return parts.outbox.transfers.send(id) { ToTransfer(Start(from, to, pence, at), it) }
     }
