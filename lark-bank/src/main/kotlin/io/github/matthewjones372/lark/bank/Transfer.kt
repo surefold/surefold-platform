@@ -14,7 +14,8 @@ import io.github.matthewjones372.lark.actor.remote.delivery
 
 internal sealed interface TransferMsg
 
-internal data class Start(val from: String, val to: String, val pence: Long) : TransferMsg
+/** Starts the transfer; [at] is when it was asked for, in epoch milliseconds, so its end can say how long it took. */
+internal data class Start(val from: String, val to: String, val pence: Long, val at: Long = 0) : TransferMsg
 
 internal data class DebitDone(val taken: Boolean) : TransferMsg
 
@@ -38,10 +39,16 @@ internal enum class Phase(val ended: Boolean = false) {
     Refused(ended = true),
 }
 
-internal data class Saga(val phase: Phase = Phase.New, val from: String = "", val to: String = "", val pence: Long = 0)
+internal data class Saga(
+    val phase: Phase = Phase.New,
+    val from: String = "",
+    val to: String = "",
+    val pence: Long = 0,
+    val at: Long = 0,
+)
 
 internal sealed interface TransferEvent {
-    data class Requested(val from: String, val to: String, val pence: Long) : TransferEvent
+    data class Requested(val from: String, val to: String, val pence: Long, val at: Long) : TransferEvent
 
     data object Debited : TransferEvent
 
@@ -51,7 +58,7 @@ internal sealed interface TransferEvent {
 }
 
 internal fun Saga.after(event: TransferEvent): Saga = when (event) {
-    is TransferEvent.Requested -> Saga(Phase.Requested, event.from, event.to, event.pence)
+    is TransferEvent.Requested -> Saga(Phase.Requested, event.from, event.to, event.pence, event.at)
     TransferEvent.Debited -> copy(phase = Phase.Debited)
     TransferEvent.Credited -> copy(phase = Phase.Done)
     TransferEvent.Refused -> copy(phase = Phase.Refused)
@@ -74,7 +81,7 @@ internal fun transfer(id: String, send: (account: String, AccountMsg) -> Unit, e
                 fun end(s: Saga) = ended(id, s)
                 when (command) {
                     is Start -> when (saga.phase) {
-                        Phase.New -> command.run { persist(TransferEvent.Requested(from, to, pence)) }.then(::debit)
+                        Phase.New -> command.run { persist(TransferEvent.Requested(from, to, pence, at)) }.then(::debit)
                         Phase.Requested -> none().then(::debit)
                         Phase.Debited -> none().then(::credit)
                         Phase.Done, Phase.Refused -> none().then(::end)
@@ -105,7 +112,7 @@ internal fun transfer(id: String, send: (account: String, AccountMsg) -> Unit, e
 
 internal object TransferEvents : EventCodec<TransferEvent> {
     override fun encode(event: TransferEvent): ByteArray = when (event) {
-        is TransferEvent.Requested -> "R|${event.from}|${event.to}|${event.pence}"
+        is TransferEvent.Requested -> "R|${event.from}|${event.to}|${event.pence}|${event.at}"
         TransferEvent.Debited -> "D"
         TransferEvent.Credited -> "C"
         TransferEvent.Refused -> "X"
@@ -114,10 +121,17 @@ internal object TransferEvents : EventCodec<TransferEvent> {
     override fun decode(bytes: ByteArray): TransferEvent {
         val fields = String(bytes).split("|")
         return when (fields[0]) {
-            "R" -> fields.let { (_, from, to, pence) -> TransferEvent.Requested(from, to, pence.toLong()) }
+            // A start written before it carried its time has no fifth field, and is read as started at zero.
+            "R" -> (fields + "0").let { (_, from, to, pence, at) ->
+                TransferEvent.Requested(from, to, pence.toLong(), at.toLong())
+            }
+
             "D" -> TransferEvent.Debited
+
             "C" -> TransferEvent.Credited
+
             "X" -> TransferEvent.Refused
+
             else -> error("no transfer event is written '${fields[0]}'")
         }
     }
@@ -130,6 +144,7 @@ internal object TransferCodec : MessageCodec<TransferMsg> {
             out.string(message.from)
             out.string(message.to)
             out.long(message.pence)
+            out.long(message.at)
         }
 
         is DebitDone -> {
@@ -152,7 +167,7 @@ internal object TransferCodec : MessageCodec<TransferMsg> {
     }
 
     override fun read(input: WireIn): TransferMsg = when (val tag = input.int()) {
-        START -> Start(input.string(), input.string(), input.long())
+        START -> Start(input.string(), input.string(), input.long(), input.long())
         DEBIT_DONE -> DebitDone(input.boolean())
         CREDIT_DONE -> CreditDone
         STATUS -> Status(input.reply(Codecs.string))

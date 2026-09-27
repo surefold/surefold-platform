@@ -46,7 +46,7 @@ private class Bank(val actors: TestActors, private val answering: Boolean = true
 
     fun open(id: String, pence: Long) = account(id).ask<Long> { Open(pence, it) }
 
-    fun balance(id: String) = account(id).ask<Long> { Balance(it) }
+    fun balance(id: String) = account(id).ask<Statement> { Balance(it) }.map { it.balance }
 
     fun status(transfer: String) = transfer(transfer).ask<String> { Status(it) }
 }
@@ -143,15 +143,35 @@ class SagaTest {
     }
 
     @Test
+    fun `a statement shows the fifty latest movements, newest first`() = testActors<Unit> {
+        val bank = Bank(this)
+        bank.open("a", 2_000)
+        bank.open("b", 0)
+
+        (1..55).forEach { bank.transfer("t-$it").tell(Start("a", "b", it.toLong())) }
+
+        val statement = bank.account("a").ask<Statement> { Balance(it) }.getOrNull()
+        statement?.balance shouldBe 2_000L - (1..55).sum()
+        statement?.movements shouldBe (55 downTo 6).map { Movement("t-$it", -it.toLong()) }
+    }
+
+    @Test
+    fun `a start written before it carried its time is read back as started at zero`() {
+        TransferEvents.decode("R|a|b|5".toByteArray()) shouldBe TransferEvent.Requested("a", "b", 5, at = 0)
+    }
+
+    @Test
     fun `every message crosses the wire and every event the journal as it was`() {
         val delivery = Delivery("saga-n1", "a", 3, Delivery.NoOne)
         val accounts = listOf(Debit("t", 1), Credit("t", 2), ToAccount(Credit("t", 4), delivery))
-        val transfers = listOf(Start("a", "b", 3), DebitDone(false), CreditDone, ToTransfer(CreditDone, delivery))
+        val transfers = listOf(Start("a", "b", 3, 9), DebitDone(false), CreditDone, ToTransfer(CreditDone, delivery))
         accounts.forEach { roundTrip(AccountCodec, it) shouldBe it }
         transfers.forEach { roundTrip(TransferCodec, it) shouldBe it }
+        val statement = Statement(open = true, balance = 3, movements = listOf(Movement("t", -1), Movement("u", 4)))
+        roundTrip(StatementCodec, statement) shouldBe statement
         val events = listOf(AccountEvent.Opened(1), AccountEvent.Debited("t", 2), AccountEvent.Credited("t", 3))
         events.forEach { AccountEvents.decode(AccountEvents.encode(it)) shouldBe it }
-        val steps = listOf(TransferEvent.Requested("a", "b", 1), TransferEvent.Debited, TransferEvent.Credited)
+        val steps = listOf(TransferEvent.Requested("a", "b", 1, 7), TransferEvent.Debited, TransferEvent.Credited)
         steps.forEach { TransferEvents.decode(TransferEvents.encode(it)) shouldBe it }
     }
 }

@@ -17,7 +17,13 @@ internal sealed interface AccountMsg
 /** Opens the account with [pence] in it unless it is open already, and answers its balance. */
 internal data class Open(val pence: Long, val reply: Reply<Long>) : AccountMsg
 
-internal data class Balance(val reply: Reply<Long>) : AccountMsg
+/** Answers the account's statement: whether it is open, its balance and its latest movements. */
+internal data class Balance(val reply: Reply<Statement>) : AccountMsg
+
+/** Money in or out of an account: [pence] is negative for a debit. */
+internal data class Movement(val transfer: String, val pence: Long)
+
+internal data class Statement(val open: Boolean, val balance: Long, val movements: List<Movement>)
 
 internal data class Debit(val transfer: String, val pence: Long) : AccountMsg
 
@@ -46,13 +52,30 @@ internal data class Ledger(
     val balance: Long = 0,
     val debits: Map<String, Boolean> = emptyMap(),
     val credits: Set<String> = emptySet(),
-)
+    val movements: List<Movement> = emptyList(),
+) {
+    fun moved(transfer: String, pence: Long) = (listOf(Movement(transfer, pence)) + movements).take(MOVEMENTS)
+}
+
+/** How many of an account's movements its statement shows, newest first. */
+private const val MOVEMENTS = 50
 
 internal fun Ledger.after(event: AccountEvent): Ledger = when (event) {
     is AccountEvent.Opened -> copy(open = true, balance = balance + event.pence)
-    is AccountEvent.Debited -> copy(balance = balance - event.pence, debits = debits + (event.transfer to true))
+
+    is AccountEvent.Debited -> copy(
+        balance = balance - event.pence,
+        debits = debits + (event.transfer to true),
+        movements = moved(event.transfer, -event.pence),
+    )
+
     is AccountEvent.Refused -> copy(debits = debits + (event.transfer to false))
-    is AccountEvent.Credited -> copy(balance = balance + event.pence, credits = credits + event.transfer)
+
+    is AccountEvent.Credited -> copy(
+        balance = balance + event.pence,
+        credits = credits + event.transfer,
+        movements = moved(event.transfer, event.pence),
+    )
 }
 
 /** The account [id]. It tells each transfer how its debit or credit went through [answer], which sends reliably. */
@@ -66,7 +89,7 @@ internal fun account(id: String, answer: (transfer: String, TransferMsg) -> Unit
                 is Open -> (if (ledger.open) none() else persist(AccountEvent.Opened(command.pence)))
                     .then { command.reply(it.balance) }
 
-                is Balance -> none().then { command.reply(it.balance) }
+                is Balance -> none().then { command.reply(Statement(it.open, it.balance, it.movements)) }
 
                 is Debit -> when {
                     command.transfer in ledger.debits -> none()
@@ -120,7 +143,7 @@ internal object AccountCodec : MessageCodec<AccountMsg> {
 
         is Balance -> {
             out.int(BALANCE)
-            out.reply(message.reply, Codecs.long)
+            out.reply(message.reply, StatementCodec)
         }
 
         is Debit -> {
@@ -144,7 +167,7 @@ internal object AccountCodec : MessageCodec<AccountMsg> {
 
     override fun read(input: WireIn): AccountMsg = when (val tag = input.int()) {
         OPEN -> Open(input.long(), input.reply(Codecs.long))
-        BALANCE -> Balance(input.reply(Codecs.long))
+        BALANCE -> Balance(input.reply(StatementCodec))
         DEBIT -> Debit(input.string(), input.long())
         CREDIT -> Credit(input.string(), input.long())
         SENT -> ToAccount(read(input), input.delivery())
@@ -156,4 +179,19 @@ internal object AccountCodec : MessageCodec<AccountMsg> {
     private const val DEBIT = 3
     private const val CREDIT = 4
     private const val SENT = 5
+}
+
+internal object StatementCodec : MessageCodec<Statement> {
+    override fun write(message: Statement, out: WireOut) {
+        out.boolean(message.open)
+        out.long(message.balance)
+        out.int(message.movements.size)
+        message.movements.forEach {
+            out.string(it.transfer)
+            out.long(it.pence)
+        }
+    }
+
+    override fun read(input: WireIn): Statement =
+        Statement(input.boolean(), input.long(), List(input.int()) { Movement(input.string(), input.long()) })
 }
