@@ -23,12 +23,15 @@ application {
     mainClass.set("io.github.matthewjones372.lark.bank.MainKt")
 }
 
-// Playwright finds Chromium where the environment installed it, and never downloads one.
-val browsers = providers.environmentVariable("PLAYWRIGHT_BROWSERS_PATH").orElse("/opt/pw-browsers")
+// Where the environment names its installed browsers, Playwright uses that Chromium and downloads none. Where it
+// names none, as on CI, Playwright downloads its own.
+val browsers = providers.environmentVariable("PLAYWRIGHT_BROWSERS_PATH")
 
 tasks.test {
-    environment("PLAYWRIGHT_BROWSERS_PATH", browsers.get())
-    environment("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")
+    if (browsers.isPresent) {
+        environment("PLAYWRIGHT_BROWSERS_PATH", browsers.get())
+        environment("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")
+    }
     val mainRuntime = configurations.runtimeClasspath
     inputs.files(mainRuntime).withPropertyName("mainRuntimeClasspath")
     jvmArgumentProviders.add(
