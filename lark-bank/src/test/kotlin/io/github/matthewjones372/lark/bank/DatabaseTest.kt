@@ -14,8 +14,12 @@ class DatabaseTest {
     @Test
     fun `a Postgres gets the journal's tables once, and keeps what is written to it`() {
         val url = Postgres.emptyUrl()
-        JdbcJournal(database(url)).append(opened, 0, listOf(AccountEvents.encode(AccountEvent.Opened(5))))
+        database(url).use { pool ->
+            JdbcJournal(pool).append(opened, 0, listOf(AccountEvents.encode(AccountEvent.Opened(5))))
+        }
 
-        JdbcJournal(database(url)).events(opened, AccountEvents) shouldBe listOf(AccountEvent.Opened(5))
+        database(url).use { pool ->
+            JdbcJournal(pool).events(opened, AccountEvents) shouldBe listOf(AccountEvent.Opened(5))
+        }
     }
 }

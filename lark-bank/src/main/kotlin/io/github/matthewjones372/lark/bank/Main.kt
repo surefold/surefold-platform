@@ -22,7 +22,8 @@ fun main(args: Array<String>) {
     val jdbc = options["--jdbc"]
     val only = options["--node"]
     require(only == null || jdbc != null) { "--node needs --jdbc: separate processes must share one journal" }
-    val journal = if (jdbc == null) InMemoryJournal() else JdbcJournal(database(jdbc))
+    val pool = jdbc?.let(::database)
+    val journal = pool?.let(::JdbcJournal) ?: InMemoryJournal()
     val seeds = nodes.map { (_, port) -> Node("", "127.0.0.1", port) }.let { Discovery { it } }
     val chosen = nodes.filter { (name) -> only == null || name == only }
     val started = CompletableFuture<List<Pair<BankNode, Api>>>()
@@ -47,6 +48,7 @@ fun main(args: Array<String>) {
                 api.close()
                 node.close()
             }
+            pool?.close()
         },
     )
     running.forEach { (node, api) ->
