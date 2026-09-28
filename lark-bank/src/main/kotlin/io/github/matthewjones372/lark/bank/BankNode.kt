@@ -14,7 +14,6 @@ import io.github.matthewjones372.lark.cluster.Cluster
 import io.github.matthewjones372.lark.cluster.Discovery
 import io.github.matthewjones372.lark.cluster.Downing
 import io.github.matthewjones372.lark.cluster.Gossiping
-import io.github.matthewjones372.lark.cluster.Member
 import io.github.matthewjones372.lark.cluster.MemberEvent
 import io.github.matthewjones372.lark.cluster.Sharded
 import io.github.matthewjones372.lark.cluster.Status
@@ -64,8 +63,8 @@ private class Parts(
 
 /**
  * One node of the bank, on a thread of its own until [close]: a cluster member with the accounts and transfers
- * sharded on it. Its producers are named by its incarnation, and when a member is removed, the oldest left starts
- * that member's producers again, to send what it had kept. [close] goes as a crash does: it leaves and drains nothing.
+ * sharded on it. Its producers are durable, so when a node crashes the cluster resumes what it kept (spec 0099).
+ * [close] goes as a crash does: it leaves and drains nothing.
  */
 internal class BankNode(
     val name: String,
@@ -81,10 +80,6 @@ internal class BankNode(
     val hub = Hub()
     private val recorder = Recorder()
     private val done = CountDownLatch(1)
-
-    // Set before the flock closes, so a member removed meanwhile is not adopted by a node on its way out.
-    @Volatile
-    private var closing = false
     private val started = CompletableFuture<Parts>()
     private val thread = Thread.ofPlatform().name("bank-$name").start {
         metrics.locally(recorder) { run(port, seeds, journal, settings, ended) }
@@ -117,16 +112,7 @@ internal class BankNode(
                 transfer(id, { account, command -> outbox.get().toAccount(account, command) }, announce)
             }
 
-            fun outboxOf(member: Member): Outbox {
-                val id = "${member.node.name}-${member.uid.toULong().toString(radix = 36)}"
-                return Outbox(
-                    accounts.reliable(id, settings.resendAfter, KEEP, durable = true),
-                    transfers.reliable(id, settings.resendAfter, KEEP, durable = true),
-                )
-            }
             val watcher = members.subscriber { event, seen ->
-                val oldest = seen.up.firstOrNull()?.node == cluster.self
-                if (event is MemberEvent.Removed && oldest && !closing) outboxOf(event.member)
                 // One member tells the dashboards each change: the oldest that every other can reach.
                 val teller = seen.up.firstOrNull { it.node !in seen.unreachable }?.node == cluster.self
                 val status = event.status()
@@ -134,7 +120,12 @@ internal class BankNode(
             }
             cluster.subscribe(spawn("members", watcher))
             members.await(1.minutes) { seen -> seen.members[cluster.self]?.status == Status.Up }
-            outbox.complete(outboxOf(members.seen.members.getValue(cluster.self)))
+            outbox.complete(
+                Outbox(
+                    accounts.reliable(PRODUCER, settings.resendAfter, KEEP, durable = true),
+                    transfers.reliable(PRODUCER, settings.resendAfter, KEEP, durable = true),
+                ),
+            )
             started.complete(Parts(cluster, accounts, transfers, outbox.get(), load))
             done.await()
         }
@@ -160,7 +151,6 @@ internal class BankNode(
     fun load(on: Boolean) = parts.load.tell(if (on) Load.On else Load.Off)
 
     override fun close() {
-        closing = true
         done.countDown()
         thread.join()
     }
@@ -176,5 +166,8 @@ internal class BankNode(
 
     private companion object {
         val ASK = 5.seconds
+
+        // One id on every node: the cluster names each node's outbox by its life, and resumes a gone life's.
+        const val PRODUCER = "bank"
     }
 }
