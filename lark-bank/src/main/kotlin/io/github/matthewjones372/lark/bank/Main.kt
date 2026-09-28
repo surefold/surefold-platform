@@ -1,5 +1,6 @@
 package io.github.matthewjones372.lark.bank
 
+import io.github.matthewjones372.lark.actor.InMemoryJournal
 import io.github.matthewjones372.lark.actor.journal.jdbc.JdbcJournal
 import io.github.matthewjones372.lark.actor.remote.Node
 import io.github.matthewjones372.lark.cluster.Discovery
@@ -11,8 +12,8 @@ import kotlin.time.Duration.Companion.minutes
 internal val nodes = listOf(Triple("n1", 25521, 8081), Triple("n2", 25522, 8082), Triple("n3", 25523, 8083))
 
 /**
- * `lark-bank` runs the three nodes in this JVM, with the journal in H2 in memory. `--jdbc URL` keeps the journal in
- * the Postgres or H2 database at URL instead, and `--node n2` runs only that node, for a process of its own: separate
+ * `lark-bank` runs the three nodes in this JVM, with the journal in memory. `--jdbc URL` keeps the journal in the
+ * Postgres database at URL instead, and `--node n2` runs only that node, for a process of its own: separate
  * processes share one journal, so it needs `--jdbc`. The nodes run until the JVM is stopped.
  */
 fun main(args: Array<String>) {
@@ -21,7 +22,7 @@ fun main(args: Array<String>) {
     val jdbc = options["--jdbc"]
     val only = options["--node"]
     require(only == null || jdbc != null) { "--node needs --jdbc: separate processes must share one journal" }
-    val journal = JdbcJournal(if (jdbc == null) h2("bank") else database(jdbc))
+    val journal = if (jdbc == null) InMemoryJournal() else JdbcJournal(database(jdbc))
     val seeds = nodes.map { (_, port) -> Node("", "127.0.0.1", port) }.let { Discovery { it } }
     val chosen = nodes.filter { (name) -> only == null || name == only }
     val started = CompletableFuture<List<Pair<BankNode, Api>>>()

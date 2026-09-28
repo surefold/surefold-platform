@@ -4,6 +4,7 @@ import arrow.core.Either
 import arrow.core.right
 import io.github.matthewjones372.lark.actor.NotSent
 import io.github.matthewjones372.lark.actor.journal.jdbc.JdbcJournal
+import io.github.matthewjones372.lark.actor.journal.jdbc.Postgres
 import io.github.matthewjones372.lark.actor.remote.Node
 import io.github.matthewjones372.lark.cluster.Discovery
 import io.github.matthewjones372.lark.cluster.Gossiping
@@ -11,7 +12,6 @@ import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
 import java.net.ServerSocket
-import java.util.UUID
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.LinkedBlockingQueue
@@ -30,7 +30,7 @@ internal fun openPort(): Int = ServerSocket(0).use { it.localPort }
 
 /** Three nodes on one journal, each on its own thread, formed into a cluster before this returns. */
 internal fun threeNodes(settings: Settings = calm, ended: (String, Saga) -> Unit = { _, _ -> }): List<BankNode> {
-    val journal = JdbcJournal(h2("bank-${UUID.randomUUID()}"))
+    val journal = JdbcJournal(Postgres.fresh())
     val ports = List(3) { openPort() }
     val seeds = ports.map { Node("", "127.0.0.1", it) }.let { Discovery { it } }
     val nodes = ports.mapIndexed { i, port -> BankNode("n${i + 1}", port, seeds, journal, settings, ended) }

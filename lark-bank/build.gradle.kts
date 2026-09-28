@@ -8,13 +8,12 @@ plugins {
 dependencies {
     implementation(project(":lark-cluster"))
     implementation(project(":lark-actor-journal-jdbc"))
+    implementation(project(":lark-app-liquibase"))
     // The journal in memory by default, or on Postgres with `--jdbc`.
-    implementation("com.h2database:h2:2.3.232")
     implementation("org.postgresql:postgresql:42.7.7")
 
-    // A real Postgres for `--jdbc`'s test: a binary from Maven Central, run by the test JVM, no Docker.
-    testImplementation("io.zonky.test:embedded-postgres:2.1.0")
-    testImplementation(platform("io.zonky.test.postgres:embedded-postgres-binaries-bom:17.5.0"))
+    // A real Postgres, in a container.
+    testImplementation(testFixtures(project(":lark-actor-journal-jdbc")))
     // The pages in a real headless Chromium: the only proof they work. 1.56 drives Chromium 141, build 1194.
     testImplementation("com.microsoft.playwright:playwright:1.56.0")
 }

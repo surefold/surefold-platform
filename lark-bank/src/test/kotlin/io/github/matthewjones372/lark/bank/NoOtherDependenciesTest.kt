@@ -9,12 +9,16 @@ import java.io.File
 /** What the bank runs on, stated as a test: an application may choose its dependencies, but it says which. */
 class NoOtherDependenciesTest {
 
-    // The journal's two databases: H2 in memory, and Postgres with the one jar its driver brings.
-    private val allowed =
-        listOf("kotlin-stdlib", "annotations-", "arrow-", "lark", "h2-", "postgresql-", "checker-qual-")
+    // The journal on Postgres, with the one jar its driver brings, and Liquibase, which applies the journal's
+    // changelog, with the jars it brings.
+    private val allowed = listOf(
+        "kotlin-stdlib", "annotations-", "arrow-", "lark", "postgresql-", "checker-qual-",
+        "liquibase-core-", "opencsv-", "snakeyaml-", "jaxb-api-", "commons-collections4-", "commons-text-",
+        "commons-lang3-", "commons-io-",
+    )
 
     @Test
-    fun `the main runtime classpath is lark-cluster, the JDBC journal and its two drivers, and nothing else`() {
+    fun `the main runtime classpath is lark-cluster, the JDBC journal, Postgres and Liquibase, and no more`() {
         val raw = System.getProperty("lark.bank.runtimeClasspath")
         withClue("the build must pass -Dlark.bank.runtimeClasspath; see lark-bank/build.gradle.kts") {
             raw.shouldNotBeNull()
@@ -24,7 +28,7 @@ class NoOtherDependenciesTest {
             .filter { it.isNotBlank() }
             .filterNot { entry -> allowed.any { entry.startsWith(it) } }
 
-        withClue("lark-bank must stay lark-cluster, the journal and H2 and Postgres, but found: $unexpected") {
+        withClue("lark-bank must stay lark-cluster, the journal, Postgres and Liquibase, but found: $unexpected") {
             unexpected.shouldBeEmpty()
         }
     }
