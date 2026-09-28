@@ -152,6 +152,9 @@ internal fun streamOf(hub: Hub, streaming: Streaming) = HttpHandler { exchange -
         exchange.responseHeaders.add("Content-Type", "text/event-stream")
         exchange.responseHeaders.add("Cache-Control", "no-cache")
         exchange.sendResponseHeaders(200, 0)
+        // The headers out now, not with the first event: a client, EventSource included, waits for them before it
+        // counts the stream as open, and JDK 25's server holds them until the body is flushed.
+        exchange.responseBody.flush()
         val stream = Stream(streaming)
         hub.join(stream)
         try {
