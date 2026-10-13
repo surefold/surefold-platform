@@ -11,6 +11,8 @@ import io.github.matthewjones372.lark.actor.onStart
 import io.github.matthewjones372.lark.actor.remote.MessageCodec
 import io.github.matthewjones372.lark.actor.remote.WireIn
 import io.github.matthewjones372.lark.actor.remote.WireOut
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -51,6 +53,7 @@ internal class Recorder : Metrics {
 }
 
 /** What one node publishes each second on `bank-stats`: what it did in that second, and what it holds now. */
+@Serializable
 internal data class NodeStats(
     val node: String,
     val at: String,
@@ -62,36 +65,28 @@ internal data class NodeStats(
     val unconfirmed: Long,
     val deadLetters: Long,
 ) {
-    fun json() = Json.write(
-        mapOf(
-            "node" to node, "at" to at, "transfersPerSecond" to transfersPerSecond, "refused" to refused,
-            "p99Ms" to p99Ms, "shards" to shards, "entities" to entities, "unconfirmed" to unconfirmed,
-            "deadLetters" to deadLetters,
-        ),
-    )
+    fun json() = json.encodeToString(this)
 }
 
 /** What happened in the cluster, on `bank-events`: a member changed, or a transfer ended. */
 internal sealed interface BankEvent {
+    @Serializable
     data class Member(val node: String, val status: String) : BankEvent
 
+    @Serializable
     data class Ended(
         val id: String,
         val from: String,
         val to: String,
-        val pence: Long,
+        @SerialName("amount") val pence: Long,
         val outcome: String,
         val ms: Long,
     ) : BankEvent
 }
 
 internal fun BankEvent.event(): Event = when (this) {
-    is BankEvent.Member -> Event("member", Json.write(mapOf("node" to node, "status" to status)))
-
-    is BankEvent.Ended -> Event(
-        "transfer",
-        Json.write(mapOf("id" to id, "from" to from, "to" to to, "amount" to pence, "outcome" to outcome, "ms" to ms)),
-    )
+    is BankEvent.Member -> Event("member", json.encodeToString(this))
+    is BankEvent.Ended -> Event("transfer", json.encodeToString(this))
 }
 
 internal data object Sample

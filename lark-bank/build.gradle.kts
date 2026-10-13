@@ -3,6 +3,7 @@
 
 plugins {
     application
+    kotlin("plugin.serialization")
 }
 
 dependencies {
@@ -12,6 +13,7 @@ dependencies {
     // The journal in memory by default, or on Postgres with `--jdbc`.
     implementation("org.postgresql:postgresql:42.7.7")
     implementation("com.zaxxer:HikariCP:7.1.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
 
     // A real Postgres, in a container.
     testImplementation(testFixtures(project(":lark-actor-journal-jdbc")))

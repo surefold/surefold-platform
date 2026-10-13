@@ -2,11 +2,17 @@ package io.github.matthewjones372.lark.bank
 
 import io.github.matthewjones372.lark.actor.remote.outbox
 import io.kotest.matchers.shouldBe
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 import org.junit.jupiter.api.Test
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse.BodyHandlers
+
+/** A JSON object's fields, a string's content and any other value as written. */
+private fun fields(data: String): Map<String, String> =
+    json.parseToJsonElement(data).jsonObject.mapValues { (_, value) -> (value as? JsonPrimitive)?.content ?: "$value" }
 
 /** Each event on an SSE stream as its type and its data's fields, read as the lines arrive. */
 internal fun events(lines: Iterator<String>): Iterator<Pair<String, Map<String, String>>> = iterator {
@@ -16,7 +22,7 @@ internal fun events(lines: Iterator<String>): Iterator<Pair<String, Map<String, 
         when {
             line.startsWith("event: ") -> type = line.removePrefix("event: ")
             line.startsWith("data: ") -> data = line.removePrefix("data: ")
-            line.isEmpty() && type.isNotEmpty() -> yield(type to Json.read(data).orEmpty()).also { type = "" }
+            line.isEmpty() && type.isNotEmpty() -> yield(type to fields(data)).also { type = "" }
         }
     }
 }

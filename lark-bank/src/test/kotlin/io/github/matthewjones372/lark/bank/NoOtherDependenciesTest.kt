@@ -10,15 +10,16 @@ import java.io.File
 class NoOtherDependenciesTest {
 
     // The journal on Postgres, with the one jar its driver brings, through HikariCP and the logging API it brings;
-    // and Liquibase, which applies the journal's changelog, with the jars it brings.
+    // Liquibase, which applies the journal's changelog, with the jars it brings; and kotlinx.serialization's JSON.
     private val allowed = listOf(
         "kotlin-stdlib", "annotations-", "arrow-", "lark", "postgresql-", "checker-qual-", "HikariCP-", "slf4j-api-",
         "liquibase-core-", "opencsv-", "snakeyaml-", "jaxb-api-", "commons-collections4-", "commons-text-",
         "commons-lang3-", "commons-io-",
+        "kotlinx-serialization-",
     )
 
     @Test
-    fun `the main runtime classpath is lark-cluster, the JDBC journal, Postgres and Liquibase, and no more`() {
+    fun `the main runtime classpath is lark-cluster, the JDBC journal, Postgres, Liquibase and JSON, and no more`() {
         val raw = System.getProperty("lark.bank.runtimeClasspath")
         withClue("the build must pass -Dlark.bank.runtimeClasspath; see lark-bank/build.gradle.kts") {
             raw.shouldNotBeNull()
