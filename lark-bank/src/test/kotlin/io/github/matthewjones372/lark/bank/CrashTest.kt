@@ -21,9 +21,13 @@ import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
+/**
+ * Brisk gossip, but resends no sooner than a resumed producer's. An entity answers each repeat by sending again,
+ * so on a loaded machine a resend that beats the journal's round trip makes more writes: at 300 ms the test stalled.
+ */
 internal val calm = Settings(
     gossiping = Gossiping(probeEvery = 500.milliseconds, ackWithin = 250.milliseconds, formAfter = 1.seconds),
-    resendAfter = 300.milliseconds,
+    resendAfter = 2.seconds,
 )
 
 internal fun openPort(): Int = ServerSocket(0).use { it.localPort }
