@@ -1,8 +1,9 @@
 package io.github.matthewjones372.lark.bank
 
-import arrow.core.Either
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
+import io.github.matthewjones372.lark.fail.Either
+import io.github.matthewjones372.lark.fail.fold
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.encodeToJsonElement
 import java.net.InetSocketAddress

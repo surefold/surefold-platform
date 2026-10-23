@@ -1,13 +1,13 @@
 package io.github.matthewjones372.lark.bank
 
-import arrow.core.Either
-import arrow.core.right
 import io.github.matthewjones372.lark.actor.NotSent
 import io.github.matthewjones372.lark.actor.journal.jdbc.JdbcJournal
 import io.github.matthewjones372.lark.actor.journal.jdbc.Postgres
 import io.github.matthewjones372.lark.actor.remote.Node
 import io.github.matthewjones372.lark.cluster.Discovery
 import io.github.matthewjones372.lark.cluster.Gossiping
+import io.github.matthewjones372.lark.fail.Either
+import io.github.matthewjones372.lark.fail.right
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
