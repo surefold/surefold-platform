@@ -1,6 +1,5 @@
 package io.github.matthewjones372.lark.bank
 
-import arrow.core.Either
 import io.github.matthewjones372.lark.actor.ActorRef
 import io.github.matthewjones372.lark.actor.AskFailure
 import io.github.matthewjones372.lark.actor.Journal
@@ -20,6 +19,7 @@ import io.github.matthewjones372.lark.cluster.Status
 import io.github.matthewjones372.lark.cluster.cluster
 import io.github.matthewjones372.lark.cluster.sharding
 import io.github.matthewjones372.lark.cluster.topic
+import io.github.matthewjones372.lark.fail.Either
 import io.github.matthewjones372.lark.flock
 import io.github.matthewjones372.lark.increment
 import io.github.matthewjones372.lark.metrics

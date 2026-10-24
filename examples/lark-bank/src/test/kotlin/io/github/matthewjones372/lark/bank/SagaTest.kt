@@ -1,6 +1,5 @@
 package io.github.matthewjones372.lark.bank
 
-import arrow.core.right
 import io.github.matthewjones372.lark.actor.ActorRef
 import io.github.matthewjones372.lark.actor.Address
 import io.github.matthewjones372.lark.actor.Confirmed
@@ -12,6 +11,8 @@ import io.github.matthewjones372.lark.actor.events
 import io.github.matthewjones372.lark.actor.remote.MessageCodec
 import io.github.matthewjones372.lark.actor.remote.outbox
 import io.github.matthewjones372.lark.actor.testActors
+import io.github.matthewjones372.lark.fail.map
+import io.github.matthewjones372.lark.fail.right
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import java.util.concurrent.ConcurrentHashMap
