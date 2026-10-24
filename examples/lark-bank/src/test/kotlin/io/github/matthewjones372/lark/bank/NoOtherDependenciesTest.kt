@@ -1,8 +1,8 @@
 package io.github.matthewjones372.lark.bank
 
-import io.kotest.assertions.withClue
-import io.kotest.matchers.collections.shouldBeEmpty
-import io.kotest.matchers.nulls.shouldNotBeNull
+import io.github.matthewjones372.lark.assert.shouldBeEmpty
+import io.github.matthewjones372.lark.assert.shouldNotBeNull
+import io.github.matthewjones372.lark.assert.withClue
 import org.junit.jupiter.api.Test
 import java.io.File
 

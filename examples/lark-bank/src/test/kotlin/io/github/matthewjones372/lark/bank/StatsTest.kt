@@ -1,7 +1,7 @@
 package io.github.matthewjones372.lark.bank
 
 import io.github.matthewjones372.lark.actor.remote.outbox
-import io.kotest.matchers.shouldBe
+import io.github.matthewjones372.lark.assert.shouldBe
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import org.junit.jupiter.api.Test
