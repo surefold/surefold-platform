@@ -4,7 +4,7 @@ import io.github.matthewjones372.lark.actor.PersistenceId
 import io.github.matthewjones372.lark.actor.events
 import io.github.matthewjones372.lark.actor.journal.jdbc.JdbcJournal
 import io.github.matthewjones372.lark.actor.journal.jdbc.Postgres
-import io.kotest.matchers.shouldBe
+import io.github.matthewjones372.lark.assert.shouldBe
 import org.junit.jupiter.api.Test
 
 class DatabaseTest {

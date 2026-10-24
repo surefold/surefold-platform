@@ -19,6 +19,7 @@ dependencies {
     testImplementation(testFixtures(project(":lark-actor-journal-jdbc")))
     // The pages in a real headless Chromium: the only proof they work. 1.56 drives Chromium 141, build 1194.
     testImplementation("com.microsoft.playwright:playwright:1.56.0")
+    testImplementation(project(":lark-assert"))
 }
 
 application {

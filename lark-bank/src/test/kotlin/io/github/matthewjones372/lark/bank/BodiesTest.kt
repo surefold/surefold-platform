@@ -1,6 +1,6 @@
 package io.github.matthewjones372.lark.bank
 
-import io.kotest.matchers.shouldBe
+import io.github.matthewjones372.lark.assert.shouldBe
 import org.junit.jupiter.api.Test
 
 class BodiesTest {

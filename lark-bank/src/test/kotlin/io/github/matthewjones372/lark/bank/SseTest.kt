@@ -1,7 +1,7 @@
 package io.github.matthewjones372.lark.bank
 
 import com.sun.net.httpserver.HttpServer
-import io.kotest.matchers.shouldBe
+import io.github.matthewjones372.lark.assert.shouldBe
 import org.junit.jupiter.api.Test
 import java.net.InetSocketAddress
 import java.net.URI
