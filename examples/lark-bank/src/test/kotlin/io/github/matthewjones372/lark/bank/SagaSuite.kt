@@ -1,6 +1,5 @@
 package io.github.matthewjones372.lark.bank
 
-import io.github.matthewjones372.lark.Resource
 import io.github.matthewjones372.lark.actor.ActorRef
 import io.github.matthewjones372.lark.actor.Address
 import io.github.matthewjones372.lark.actor.Confirmed
@@ -17,7 +16,6 @@ import io.github.matthewjones372.lark.fail.right
 import io.github.matthewjones372.lark.junit.Suite
 import io.github.matthewjones372.lark.junit.forAll
 import io.github.matthewjones372.lark.junit.shouldBe
-import io.github.matthewjones372.lark.resource
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -68,11 +66,9 @@ private fun <M : Any> roundTrip(codec: MessageCodec<M>, message: M): M = codec.o
     it.decode(it.encode(message))
 }
 
-object SagaSuite : Suite<Unit>() {
-    override val shared: Resource<Unit> = resource { }
-
+object SagaSuite : Suite() {
     init {
-        test("a transfer debits one account, credits the other and ends done") { _ ->
+        test("a transfer debits one account, credits the other and ends done") {
             testActors {
                 val bank = Bank(this)
                 bank.open("a", 100)
@@ -86,7 +82,7 @@ object SagaSuite : Suite<Unit>() {
             }
         }
 
-        test("a debit below zero is refused and moves nothing") { _ ->
+        test("a debit below zero is refused and moves nothing") {
             testActors {
                 val bank = Bank(this)
                 bank.open("a", 10)
@@ -104,7 +100,7 @@ object SagaSuite : Suite<Unit>() {
             }
         }
 
-        test("a transfer is heard to end once it has, and again each time an answer to it is repeated") { _ ->
+        test("a transfer is heard to end once it has, and again each time an answer to it is repeated") {
             testActors {
                 val bank = Bank(this, answering = false)
                 bank.open("a", 50)
@@ -122,7 +118,7 @@ object SagaSuite : Suite<Unit>() {
             }
         }
 
-        test("answers lost on the way are asked for again, and each step moves the money once") { _ ->
+        test("answers lost on the way are asked for again, and each step moves the money once") {
             testActors {
                 val bank = Bank(this, answering = false)
                 bank.open("a", 100)
@@ -143,7 +139,7 @@ object SagaSuite : Suite<Unit>() {
             }
         }
 
-        test("a debit delivered twice is answered twice, confirmed twice and taken once") { _ ->
+        test("a debit delivered twice is answered twice, confirmed twice and taken once") {
             testActors {
                 val bank = Bank(this)
                 val confirms = Confirms()
@@ -159,7 +155,7 @@ object SagaSuite : Suite<Unit>() {
             }
         }
 
-        test("a statement shows the fifty latest movements, newest first") { _ ->
+        test("a statement shows the fifty latest movements, newest first") {
             testActors {
                 val bank = Bank(this)
                 bank.open("a", 2_000)
@@ -173,11 +169,11 @@ object SagaSuite : Suite<Unit>() {
             }
         }
 
-        test("a start written before it carried its time is read back as started at zero") { _ ->
+        test("a start written before it carried its time is read back as started at zero") {
             TransferEvents.decode("R|a|b|5".toByteArray()) shouldBe TransferEvent.Requested("a", "b", 5, at = 0)
         }
 
-        test("every message crosses the wire and every event the journal as it was") { _ ->
+        test("every message crosses the wire and every event the journal as it was") {
             val delivery = Delivery("saga-n1", "a", 3, Delivery.NoOne)
             val accounts = listOf(Debit("t", 1), Credit("t", 2), ToAccount(Credit("t", 4), delivery))
             val transfers =

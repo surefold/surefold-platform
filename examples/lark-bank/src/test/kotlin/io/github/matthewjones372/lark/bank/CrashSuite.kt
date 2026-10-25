@@ -1,6 +1,5 @@
 package io.github.matthewjones372.lark.bank
 
-import io.github.matthewjones372.lark.Resource
 import io.github.matthewjones372.lark.actor.NotSent
 import io.github.matthewjones372.lark.actor.journal.jdbc.JdbcJournal
 import io.github.matthewjones372.lark.actor.journal.jdbc.Postgres
@@ -13,7 +12,6 @@ import io.github.matthewjones372.lark.junit.Suite
 import io.github.matthewjones372.lark.junit.forAll
 import io.github.matthewjones372.lark.junit.shouldBe
 import io.github.matthewjones372.lark.junit.timeout
-import io.github.matthewjones372.lark.resource
 import java.net.ServerSocket
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
@@ -47,14 +45,12 @@ internal fun threeNodes(settings: Settings = calm, ended: (String, Saga) -> Unit
     return nodes
 }
 
-object CrashSuite : Suite<Unit>() {
-    override val shared: Resource<Unit> = resource { }
-
+object CrashSuite : Suite() {
     init {
         test(
             "a thousand transfers across three nodes, one crashed midway, end done or refused and lose no money",
             timeout(120.seconds),
-        ) { _ ->
+        ) {
             val ended = LinkedBlockingQueue<Pair<String, Phase>>()
             val nodes = threeNodes { id, saga -> ended.put(id to saga.phase) }
             val (n1, n2, n3) = nodes

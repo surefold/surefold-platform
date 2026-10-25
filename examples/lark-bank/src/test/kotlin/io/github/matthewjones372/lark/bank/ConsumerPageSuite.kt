@@ -5,7 +5,7 @@ import com.microsoft.playwright.BrowserType
 import com.microsoft.playwright.Playwright
 import com.microsoft.playwright.assertions.PlaywrightAssertions.assertThat
 import io.github.matthewjones372.lark.Resource
-import io.github.matthewjones372.lark.junit.Suite
+import io.github.matthewjones372.lark.junit.SharedSuite
 import io.github.matthewjones372.lark.junit.expect
 import io.github.matthewjones372.lark.junit.shouldBe
 import io.github.matthewjones372.lark.resource
@@ -28,7 +28,7 @@ internal fun browsed(crash: (List<BankNode>) -> (String) -> Boolean = { { false 
 }
 
 /** The pages in a real Chromium, headless: the only proof they work. */
-internal object ConsumerPageSuite : Suite<Browsed>() {
+internal object ConsumerPageSuite : SharedSuite<Browsed>() {
     override val shared: Resource<Browsed> = browsed()
 
     init {

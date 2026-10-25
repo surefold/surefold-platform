@@ -1,10 +1,8 @@
 package io.github.matthewjones372.lark.bank
 
 import com.sun.net.httpserver.HttpServer
-import io.github.matthewjones372.lark.Resource
 import io.github.matthewjones372.lark.junit.Suite
 import io.github.matthewjones372.lark.junit.shouldBe
-import io.github.matthewjones372.lark.resource
 import java.net.InetSocketAddress
 import java.net.URI
 import java.net.http.HttpClient
@@ -36,11 +34,9 @@ private fun stats(n: Int) = Event(STATS, """{"n":$n}""")
 
 private fun member(n: Int) = Event("member", """{"n":$n}""")
 
-object SseSuite : Suite<Unit>() {
-    override val shared: Resource<Unit> = resource { }
-
+object SseSuite : Suite() {
     init {
-        test("each event is framed with its type, its id if it has one, and its data, and a blank line") { _ ->
+        test("each event is framed with its type, its id if it has one, and its data, and a blank line") {
             val hub = Hub()
             served(hub, Streaming(heartbeat = 1.hours)) { uri ->
                 val response = client.send(HttpRequest.newBuilder(uri).build(), HttpResponse.BodyHandlers.ofLines())
@@ -64,7 +60,7 @@ object SseSuite : Suite<Unit>() {
             }
         }
 
-        test("an idle stream is sent a comment line every heartbeat") { _ ->
+        test("an idle stream is sent a comment line every heartbeat") {
             served(Hub(), Streaming(heartbeat = 50.milliseconds)) { uri ->
                 val lines = client.send(HttpRequest.newBuilder(uri).build(), HttpResponse.BodyHandlers.ofLines()).body()
 
@@ -72,7 +68,7 @@ object SseSuite : Suite<Unit>() {
             }
         }
 
-        test("a slow client loses its oldest stats first, and keeps every member event") { _ ->
+        test("a slow client loses its oldest stats first, and keeps every member event") {
             val stream = Stream(Streaming(capacity = 4))
 
             listOf(stats(1), member(1), stats(2), stats(3), member(2), stats(4), member(3)).forEach(stream::offer)
@@ -80,7 +76,7 @@ object SseSuite : Suite<Unit>() {
             stream.drain() shouldBe listOf(member(1), member(2), stats(4), member(3))
         }
 
-        test("a stream whose queue stays full for its time is closed and unsubscribed") { _ ->
+        test("a stream whose queue stays full for its time is closed and unsubscribed") {
             val now = AtomicLong()
             val hub = Hub()
             val stream = Stream(Streaming(capacity = 2, fullFor = 10.seconds), now::get)
@@ -98,7 +94,7 @@ object SseSuite : Suite<Unit>() {
                 (stream.drain() shouldBe listOf(member(0), member(1)))
         }
 
-        test("a client that goes away is unsubscribed once a write to it fails") { _ ->
+        test("a client that goes away is unsubscribed once a write to it fails") {
             val hub = Hub()
             served(hub, Streaming(heartbeat = 20.milliseconds)) { uri ->
                 val request = HttpRequest.newBuilder(uri).build()

@@ -2,7 +2,7 @@ package io.github.matthewjones372.lark.bank
 
 import io.github.matthewjones372.lark.Resource
 import io.github.matthewjones372.lark.junit.Expectations
-import io.github.matthewjones372.lark.junit.Suite
+import io.github.matthewjones372.lark.junit.SharedSuite
 import io.github.matthewjones372.lark.junit.shouldBe
 import io.github.matthewjones372.lark.resource
 import kotlinx.serialization.json.jsonObject
@@ -44,7 +44,7 @@ private fun apiCluster(): Resource<ApiCluster> = resource {
     ApiCluster(ended, apis)
 }
 
-internal object ApiSuite : Suite<ApiCluster>() {
+internal object ApiSuite : SharedSuite<ApiCluster>() {
     override val shared: Resource<ApiCluster> = apiCluster()
 
     init {

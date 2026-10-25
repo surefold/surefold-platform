@@ -1,11 +1,9 @@
 package io.github.matthewjones372.lark.bank
 
-import io.github.matthewjones372.lark.Resource
 import io.github.matthewjones372.lark.actor.remote.outbox
 import io.github.matthewjones372.lark.junit.Suite
 import io.github.matthewjones372.lark.junit.forAll
 import io.github.matthewjones372.lark.junit.shouldBe
-import io.github.matthewjones372.lark.resource
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import java.net.URI
@@ -30,11 +28,9 @@ internal fun events(lines: Iterator<String>): Iterator<Pair<String, Map<String, 
     }
 }
 
-object StatsSuite : Suite<Unit>() {
-    override val shared: Resource<Unit> = resource { }
-
+object StatsSuite : Suite() {
     init {
-        test("node 1's stream carries stats from all three nodes, then a member event once n3 has crashed") { _ ->
+        test("node 1's stream carries stats from all three nodes, then a member event once n3 has crashed") {
             val nodes = threeNodes()
             val api = Api(nodes[0], 0)
             try {
@@ -57,7 +53,7 @@ object StatsSuite : Suite<Unit>() {
             }
         }
 
-        test("stats and events cross the wire as they were, and are written as the admin page reads them") { _ ->
+        test("stats and events cross the wire as they were, and are written as the admin page reads them") {
             val stats = NodeStats("n2", "2026-09-27T20:00:00Z", 212, 3, 41, 34, 1209, 7, 0)
             val ended = BankEvent.Ended("t-1", "a-12", "a-40", 250, "Done", 18)
             val statsCrossed = NodeStatsCodec.outbox().run { decode(encode(stats)) } shouldBe stats
