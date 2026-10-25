@@ -32,7 +32,7 @@ class ApiTest {
         val (status, body) = call(node, "POST", "/api/transfers", """{"from":"$from","to":"$to","amount":$amount}""")
         status shouldBe 202
         val id = json.parseToJsonElement(body).jsonObject.getValue("id").jsonPrimitive.content
-        generateSequence { ended.poll(30, TimeUnit.SECONDS) }.first { it == id }
+        val _ = generateSequence { ended.poll(30, TimeUnit.SECONDS) }.first { it == id }
         return id
     }
 
