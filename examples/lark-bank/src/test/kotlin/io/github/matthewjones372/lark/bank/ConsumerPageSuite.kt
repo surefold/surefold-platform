@@ -6,7 +6,7 @@ import com.microsoft.playwright.Playwright
 import com.microsoft.playwright.assertions.PlaywrightAssertions.assertThat
 import io.github.matthewjones372.lark.Resource
 import io.github.matthewjones372.lark.junit.SharedSuite
-import io.github.matthewjones372.lark.junit.expect
+import io.github.matthewjones372.lark.junit.holds
 import io.github.matthewjones372.lark.junit.shouldBe
 import io.github.matthewjones372.lark.resource
 import java.net.URI
@@ -38,24 +38,23 @@ internal object ConsumerPageSuite : SharedSuite<Browsed>() {
             page.fill("#account-id", "bob")
             page.fill("#open-amount", "20")
             page.click("#open")
-            assertThat(page.locator("#balance")).hasText("20")
+            val bobOpened = holds { assertThat(page.locator("#balance")).hasText("20") }
             page.fill("#account-id", "alice")
             page.fill("#open-amount", "500")
             page.click("#open")
-            assertThat(page.locator("#balance")).hasText("500")
+            val aliceOpened = holds { assertThat(page.locator("#balance")).hasText("500") }
 
             page.fill("#to", "bob")
             page.fill("#amount", "120")
             page.click("#send")
 
-            assertThat(page.locator("#transfer-status")).hasText("Done")
-            assertThat(page.locator("#balance")).hasText("380")
-            assertThat(page.locator("#movements tbody tr")).hasCount(1)
+            val sent = holds { assertThat(page.locator("#transfer-status")).hasText("Done") }
+            val debited = holds { assertThat(page.locator("#balance")).hasText("380") }
+            val oneMovement = holds { assertThat(page.locator("#movements tbody tr")).hasCount(1) }
             page.fill("#account-id", "bob")
             page.click("#show")
-            assertThat(page.locator("#balance")).hasText("140")
-            // Playwright's assertions wait for the page, and throw if it never gets there: reaching here, each held.
-            expect(true)
+            val bobCredited = holds { assertThat(page.locator("#balance")).hasText("140") }
+            bobOpened and aliceOpened and sent and debited and oneMovement and bobCredited
         }
 
         test("the page and what it loads are served, and nothing else is") { browsed ->

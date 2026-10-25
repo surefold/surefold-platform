@@ -5,7 +5,7 @@ import com.microsoft.playwright.assertions.LocatorAssertions
 import com.microsoft.playwright.assertions.PlaywrightAssertions.assertThat
 import io.github.matthewjones372.lark.Resource
 import io.github.matthewjones372.lark.junit.SharedSuite
-import io.github.matthewjones372.lark.junit.expect
+import io.github.matthewjones372.lark.junit.holds
 import io.github.matthewjones372.lark.junit.timeout
 import kotlin.time.Duration.Companion.seconds
 
@@ -28,10 +28,10 @@ internal object AdminPageSuite : SharedSuite<Browsed>() {
         ) { browsed ->
             val page = browsed.browser.newPage()
             page.navigate("http://localhost:${browsed.apis[0].port}/admin")
-            assertThat(page.locator("#node-n3 .status")).hasText("Up", within)
+            val upBefore = holds { assertThat(page.locator("#node-n3 .status")).hasText("Up", within) }
 
             page.click("#load")
-            assertThat(page.locator("#load")).hasText("Stop load")
+            val loading = holds { assertThat(page.locator("#load")).hasText("Stop load") }
             page.waitForFunction(
                 "() => Number(document.getElementById('tps').textContent) > 0",
                 null,
@@ -39,11 +39,10 @@ internal object AdminPageSuite : SharedSuite<Browsed>() {
             )
             page.click("#crash")
 
-            assertThat(page.locator("#node-n3 .status")).hasText("Unreachable", within)
+            val unreachable = holds { assertThat(page.locator("#node-n3 .status")).hasText("Unreachable", within) }
             page.click("#load")
-            assertThat(page.locator("#load")).hasText("Start load")
-            // Playwright's assertions wait for the page, and throw if it never gets there: reaching here, each held.
-            expect(true)
+            val stopped = holds { assertThat(page.locator("#load")).hasText("Start load") }
+            upBefore and loading and unreachable and stopped
         }
     }
 }
