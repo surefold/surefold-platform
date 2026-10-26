@@ -25,7 +25,7 @@ import kotlin.time.DurationUnit
 internal const val ENDED = "bank.transfers.ended"
 internal const val TOOK = "bank.transfers.ms"
 
-/** One node's flock's metrics, as surefold records them, kept in this process for the sampler to read. */
+/** One node's scope's metrics, as surefold records them, kept in this process for the sampler to read. */
 internal class Recorder : Metrics {
     private val counters = ConcurrentHashMap<Pair<String, Map<String, String>>, DoubleAdder>()
     private val gauges = ConcurrentHashMap<Pair<String, Map<String, String>>, Double>()
