@@ -20,9 +20,9 @@ import io.github.matthewjones372.surefold.cluster.cluster
 import io.github.matthewjones372.surefold.cluster.sharding
 import io.github.matthewjones372.surefold.cluster.topic
 import io.github.matthewjones372.surefold.fail.Either
-import io.github.matthewjones372.surefold.flock
 import io.github.matthewjones372.surefold.increment
 import io.github.matthewjones372.surefold.metrics
+import io.github.matthewjones372.surefold.scope
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -86,7 +86,7 @@ internal class BankNode(
     }
 
     private fun run(port: Int, seeds: Discovery, journal: Journal, settings: Settings, ended: (String, Saga) -> Unit) {
-        flock<Nothing, Unit> {
+        scope {
             journal(journal)
             val downing = Downing.keepMajority(stableAfter = settings.downAfter)
             val cluster = cluster(node(name, port), seeds, settings.gossiping, downing, leaveWithin = Duration.ZERO)
