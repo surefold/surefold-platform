@@ -47,7 +47,7 @@ object Jobs {
     fun cancel(connection: Connection, kind: JobKind<*>, dedupeKey: String, tenant: String? = null): Boolean {
         val now = clock.get().now()
         return connection.prepareStatement(cancelling(tenant)).use { statement ->
-            statement.bind(key(kind, dedupeKey, tenant) + listOf(now, now))
+            statement.bind(key(kind, dedupeKey, tenant) + listOf(null, now, now))
             statement.executeUpdate() == 1
         }
     }
@@ -80,17 +80,25 @@ object Jobs {
 
     private fun cancelling(tenant: String?) = """
         with gone as (delete from surefold_jobs where status = 'pending' and ${keyed(tenant)} returning *)
-        insert into surefold_jobs_history ($KEPT, status, updated_at, finished_at)
-        select $KEPT, 'cancelled', ?, ? from gone
+        ${historyOf("gone", "cancelled")}
     """
 
     private fun rescheduling(tenant: String?) =
         "update surefold_jobs set run_at = ?, updated_at = ? where status = 'pending' and ${keyed(tenant)}"
 }
 
-/** The columns a job keeps when it moves to history. */
-internal const val KEPT = "id, tenant_id, kind, dedupe_key, payload, payload_version, carried, run_at, expires_at, " +
-    "priority, attempts, max_attempts, locked_by, last_error, created_at"
+/** The columns a job keeps as they were when it moves to history. */
+private const val KEPT = "id, tenant_id, kind, dedupe_key, payload, payload_version, carried, run_at, expires_at, " +
+    "priority, attempts, max_attempts, locked_by, created_at"
+
+/**
+ * Inserts the rows of [rows], a CTE of deleted jobs, into history as [status]. Takes three parameters: an error that
+ * replaces the row's own when not null, then `updated_at` and `finished_at`.
+ */
+internal fun historyOf(rows: String, status: String) = """
+    insert into surefold_jobs_history ($KEPT, last_error, status, updated_at, finished_at)
+    select $KEPT, coalesce(?::text, last_error), '$status', ?, ? from $rows
+"""
 
 /** Binds [values] in order from the first parameter. A null is sent as text, so the SQL casts what may be null. */
 internal fun PreparedStatement.bind(values: List<Any?>) {

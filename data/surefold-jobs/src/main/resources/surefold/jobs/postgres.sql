@@ -52,3 +52,7 @@ create table surefold_jobs_history (
     finished_at     timestamptz not null
 );
 create index surefold_jobs_history_finished on surefold_jobs_history (finished_at);
+
+--changeset surefold:jobs-leases
+-- What a sweep reads: the running jobs, by when their leases end.
+create index surefold_jobs_leases on surefold_jobs (locked_until) where status = 'running';
