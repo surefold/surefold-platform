@@ -40,23 +40,20 @@ object SseSuite : Suite() {
             val hub = Hub()
             served(hub, Streaming(heartbeat = 1.hours)) { uri ->
                 val response = client.send(HttpRequest.newBuilder(uri).build(), HttpResponse.BodyHandlers.ofLines())
-                val joined = hub.await(10.seconds) { it == 1 } shouldBe true
+                hub.await(10.seconds) { it == 1 } shouldBe true
                 hub.publish(Event(STATS, """{"node":"n2","transfersPerSecond":212}""", id = 1843))
                 hub.publish(Event("member", """{"node":"n3","status":"Unreachable"}"""))
 
-                joined and
-                    (response.headers().firstValue("Content-Type").orElse("") shouldBe "text/event-stream") and
-                    (
-                        response.body().limit(7).toList() shouldBe listOf(
-                            "event: stats",
-                            "id: 1843",
-                            """data: {"node":"n2","transfersPerSecond":212}""",
-                            "",
-                            "event: member",
-                            """data: {"node":"n3","status":"Unreachable"}""",
-                            "",
-                        )
-                        )
+                response.headers().firstValue("Content-Type").orElse("") shouldBe "text/event-stream"
+                response.body().limit(7).toList() shouldBe listOf(
+                    "event: stats",
+                    "id: 1843",
+                    """data: {"node":"n2","transfersPerSecond":212}""",
+                    "",
+                    "event: member",
+                    """data: {"node":"n3","status":"Unreachable"}""",
+                    "",
+                )
             }
         }
 
@@ -84,14 +81,13 @@ object SseSuite : Suite() {
             repeat(3) { hub.publish(member(it)) }
             now.addAndGet(9.seconds.inWholeNanoseconds)
             hub.publish(member(3))
-            val stillOpen = (stream.open to hub.size) shouldBe (true to 1)
+            (stream.open to hub.size) shouldBe (true to 1)
 
             now.addAndGet(1.seconds.inWholeNanoseconds)
             hub.publish(member(4))
 
-            stillOpen and
-                ((stream.open to hub.size) shouldBe (false to 0)) and
-                (stream.drain() shouldBe listOf(member(0), member(1)))
+            (stream.open to hub.size) shouldBe (false to 0)
+            stream.drain() shouldBe listOf(member(0), member(1))
         }
 
         test("a client that goes away is unsubscribed once a write to it fails") {
@@ -99,12 +95,12 @@ object SseSuite : Suite() {
             served(hub, Streaming(heartbeat = 20.milliseconds)) { uri ->
                 val request = HttpRequest.newBuilder(uri).build()
                 val body = client.send(request, HttpResponse.BodyHandlers.ofInputStream()).body()
-                val joined = hub.await(10.seconds) { it == 1 } shouldBe true
+                hub.await(10.seconds) { it == 1 } shouldBe true
                 body.read()
 
                 body.close()
 
-                joined and (hub.await(10.seconds) { it == 0 } shouldBe true)
+                hub.await(10.seconds) { it == 0 } shouldBe true
             }
         }
     }

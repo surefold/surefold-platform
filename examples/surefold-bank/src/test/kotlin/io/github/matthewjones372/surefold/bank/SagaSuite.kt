@@ -76,9 +76,9 @@ object SagaSuite : Suite() {
 
                 bank.transfer("t-1").tell(Start("a", "b", 30))
 
-                (bank.status("t-1") shouldBe "Done".right()) and
-                    (bank.balance("a") shouldBe 70L.right()) and
-                    (bank.balance("b") shouldBe 35L.right())
+                bank.status("t-1") shouldBe "Done".right()
+                bank.balance("a") shouldBe 70L.right()
+                bank.balance("b") shouldBe 35L.right()
             }
         }
 
@@ -90,13 +90,11 @@ object SagaSuite : Suite() {
 
                 bank.transfer("t-1").tell(Start("a", "b", 11))
 
-                (bank.status("t-1") shouldBe "Refused".right()) and
-                    (bank.balance("a") shouldBe 10L.right()) and
-                    (bank.balance("b") shouldBe 0L.right()) and
-                    (
-                        journal.events(PersistenceId("account", "a"), AccountEvents).last() shouldBe
-                            AccountEvent.Refused("t-1", 11)
-                        )
+                bank.status("t-1") shouldBe "Refused".right()
+                bank.balance("a") shouldBe 10L.right()
+                bank.balance("b") shouldBe 0L.right()
+                journal.events(PersistenceId("account", "a"), AccountEvents).last() shouldBe
+                    AccountEvent.Refused("t-1", 11)
             }
         }
 
@@ -108,13 +106,12 @@ object SagaSuite : Suite() {
                 val transfer = bank.transfer("t-1")
                 transfer.tell(Start("a", "b", 50))
                 transfer.tell(DebitDone(taken = true))
-                val notYet = bank.ended.toList() shouldBe emptyList()
+                bank.ended.toList() shouldBe emptyList()
 
                 repeat(2) { transfer.tell(CreditDone) }
 
-                notYet and
-                    (bank.ended shouldBe List(2) { "t-1" to Phase.Done }) and
-                    (bank.status("t-1") shouldBe "Done".right())
+                bank.ended shouldBe List(2) { "t-1" to Phase.Done }
+                bank.status("t-1") shouldBe "Done".right()
             }
         }
 
@@ -131,11 +128,11 @@ object SagaSuite : Suite() {
                 transfer.tell(DebitDone(taken = true))
 
                 val asked = List(2) { "t-1" to DebitDone(taken = true) } + List(2) { "t-1" to CreditDone }
-                (bank.answers shouldBe asked) and
-                    (bank.balance("a") shouldBe 60L.right()) and
-                    (bank.balance("b") shouldBe 40L.right()) and
-                    (bank.status("t-1") shouldBe "Done".right()) and
-                    (bank.ended shouldBe List(2) { "t-1" to Phase.Done })
+                bank.answers shouldBe asked
+                bank.balance("a") shouldBe 60L.right()
+                bank.balance("b") shouldBe 40L.right()
+                bank.status("t-1") shouldBe "Done".right()
+                bank.ended shouldBe List(2) { "t-1" to Phase.Done }
             }
         }
 
@@ -149,9 +146,9 @@ object SagaSuite : Suite() {
                 repeat(2) { bank.account("a").tell(ToAccount(Debit("t-1", 25), delivery)) }
 
                 val answered = List(2) { "t-1" to DebitDone(taken = true) }
-                (bank.balance("a") shouldBe 75L.right()) and
-                    (bank.answers.filter { it.first == "t-1" } shouldBe answered) and
-                    (confirms.confirmed shouldBe List(2) { Confirmed("a", 1) })
+                bank.balance("a") shouldBe 75L.right()
+                bank.answers.filter { it.first == "t-1" } shouldBe answered
+                confirms.confirmed shouldBe List(2) { Confirmed("a", 1) }
             }
         }
 
@@ -164,8 +161,8 @@ object SagaSuite : Suite() {
                 (1..55).forEach { bank.transfer("t-$it").tell(Start("a", "b", it.toLong())) }
 
                 val statement = bank.account("a").ask<Statement> { Balance(it) }.getOrNull()
-                (statement?.balance shouldBe 2_000L - (1..55).sum()) and
-                    (statement?.movements shouldBe (55 downTo 6).map { Movement("t-$it", -it.toLong()) })
+                statement?.balance shouldBe 2_000L - (1..55).sum()
+                statement?.movements shouldBe (55 downTo 6).map { Movement("t-$it", -it.toLong()) }
             }
         }
 
@@ -182,11 +179,11 @@ object SagaSuite : Suite() {
                 Statement(open = true, balance = 3, movements = listOf(Movement("t", -1), Movement("u", 4)))
             val events = listOf(AccountEvent.Opened(1), AccountEvent.Debited("t", 2), AccountEvent.Credited("t", 3))
             val steps = listOf(TransferEvent.Requested("a", "b", 1, 7), TransferEvent.Debited, TransferEvent.Credited)
-            accounts.forAll { roundTrip(AccountCodec, it) shouldBe it } and
-                transfers.forAll { roundTrip(TransferCodec, it) shouldBe it } and
-                (roundTrip(StatementCodec, statement) shouldBe statement) and
-                events.forAll { AccountEvents.decode(AccountEvents.encode(it)) shouldBe it } and
-                steps.forAll { TransferEvents.decode(TransferEvents.encode(it)) shouldBe it }
+            accounts.forAll { roundTrip(AccountCodec, it) shouldBe it }
+            transfers.forAll { roundTrip(TransferCodec, it) shouldBe it }
+            roundTrip(StatementCodec, statement) shouldBe statement
+            events.forAll { AccountEvents.decode(AccountEvents.encode(it)) shouldBe it }
+            steps.forAll { TransferEvents.decode(TransferEvents.encode(it)) shouldBe it }
         }
     }
 }

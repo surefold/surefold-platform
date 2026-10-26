@@ -56,7 +56,7 @@ object CrashSuite : Suite() {
             val (n1, n2, n3) = nodes
             try {
                 val accounts = List(20) { "a-$it" }
-                val opened = accounts.forAll { n1.open(it, 1_000) shouldBe 1_000L.right() }
+                accounts.forAll { n1.open(it, 1_000) shouldBe 1_000L.right() }
                 val random = Random(94)
                 val transfers = List(1_000) { i ->
                     val (from, to) = accounts.shuffled(random).take(2)
@@ -79,19 +79,18 @@ object CrashSuite : Suite() {
                 halfway.await()
                 n3.close()
                 senders.forEach(Thread::join)
-                val allSent = sent.toList() shouldBe List(transfers.size) { Unit.right() }
+                sent.toList() shouldBe List(transfers.size) { Unit.right() }
 
-                val gone = listOf(n1, n2).forAll { node ->
+                listOf(n1, n2).forAll { node ->
                     node.members.await(1.minutes) { seen -> seen.members.keys.none { it.name == "n3" } } shouldBe true
                 }
                 // Each transfer is heard to end at least once; a crash may repeat one.
                 val outcomes = generateSequence { ended.poll(30, TimeUnit.SECONDS) }
                     .scan(emptyMap<String, Phase>()) { heard, (id, phase) -> heard + (id to phase) }
                     .firstOrNull { it.size == transfers.size }
-                opened and allSent and gone and
-                    (outcomes?.keys shouldBe transfers.map { it.first }.toSet()) and
-                    (outcomes?.values?.toSet() shouldBe setOf(Phase.Done, Phase.Refused)) and
-                    (accounts.sumOf { n1.statement(it).getOrNull()?.balance ?: 0 } shouldBe 20_000L)
+                outcomes?.keys shouldBe transfers.map { it.first }.toSet()
+                outcomes?.values?.toSet() shouldBe setOf(Phase.Done, Phase.Refused)
+                accounts.sumOf { n1.statement(it).getOrNull()?.balance ?: 0 } shouldBe 20_000L
             } finally {
                 nodes.forEach(BankNode::close)
             }

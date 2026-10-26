@@ -28,10 +28,10 @@ internal object AdminPageSuite : SharedSuite<Browsed>() {
         ) { browsed ->
             val page = browsed.browser.newPage()
             page.navigate("http://localhost:${browsed.apis[0].port}/admin")
-            val upBefore = holds { assertThat(page.locator("#node-n3 .status")).hasText("Up", within) }
+            holds { assertThat(page.locator("#node-n3 .status")).hasText("Up", within) }
 
             page.click("#load")
-            val loading = holds { assertThat(page.locator("#load")).hasText("Stop load") }
+            holds { assertThat(page.locator("#load")).hasText("Stop load") }
             page.waitForFunction(
                 "() => Number(document.getElementById('tps').textContent) > 0",
                 null,
@@ -39,10 +39,9 @@ internal object AdminPageSuite : SharedSuite<Browsed>() {
             )
             page.click("#crash")
 
-            val unreachable = holds { assertThat(page.locator("#node-n3 .status")).hasText("Unreachable", within) }
+            holds { assertThat(page.locator("#node-n3 .status")).hasText("Unreachable", within) }
             page.click("#load")
-            val stopped = holds { assertThat(page.locator("#load")).hasText("Start load") }
-            upBefore and loading and unreachable and stopped
+            holds { assertThat(page.locator("#load")).hasText("Start load") }
         }
     }
 }

@@ -38,23 +38,22 @@ internal object ConsumerPageSuite : SharedSuite<Browsed>() {
             page.fill("#account-id", "bob")
             page.fill("#open-amount", "20")
             page.click("#open")
-            val bobOpened = holds { assertThat(page.locator("#balance")).hasText("20") }
+            holds { assertThat(page.locator("#balance")).hasText("20") }
             page.fill("#account-id", "alice")
             page.fill("#open-amount", "500")
             page.click("#open")
-            val aliceOpened = holds { assertThat(page.locator("#balance")).hasText("500") }
+            holds { assertThat(page.locator("#balance")).hasText("500") }
 
             page.fill("#to", "bob")
             page.fill("#amount", "120")
             page.click("#send")
 
-            val sent = holds { assertThat(page.locator("#transfer-status")).hasText("Done") }
-            val debited = holds { assertThat(page.locator("#balance")).hasText("380") }
-            val oneMovement = holds { assertThat(page.locator("#movements tbody tr")).hasCount(1) }
+            holds { assertThat(page.locator("#transfer-status")).hasText("Done") }
+            holds { assertThat(page.locator("#balance")).hasText("380") }
+            holds { assertThat(page.locator("#movements tbody tr")).hasCount(1) }
             page.fill("#account-id", "bob")
             page.click("#show")
-            val bobCredited = holds { assertThat(page.locator("#balance")).hasText("140") }
-            bobOpened and aliceOpened and sent and debited and oneMovement and bobCredited
+            holds { assertThat(page.locator("#balance")).hasText("140") }
         }
 
         test("the page and what it loads are served, and nothing else is") { browsed ->
@@ -64,11 +63,11 @@ internal object ConsumerPageSuite : SharedSuite<Browsed>() {
                 HttpResponse.BodyHandlers.ofString(),
             )
             fun type(path: String) = get(path).headers().firstValue("Content-Type").orElse("")
-            (type("/") shouldBe "text/html; charset=utf-8") and
-                (get("/consumer.js").statusCode() shouldBe 200) and
-                (type("/bank.css") shouldBe "text/css; charset=utf-8") and
-                (get("/../build.gradle.kts").statusCode() shouldBe 404) and
-                (get("/missing.html").statusCode() shouldBe 404)
+            type("/") shouldBe "text/html; charset=utf-8"
+            get("/consumer.js").statusCode() shouldBe 200
+            type("/bank.css") shouldBe "text/css; charset=utf-8"
+            get("/../build.gradle.kts").statusCode() shouldBe 404
+            get("/missing.html").statusCode() shouldBe 404
         }
     }
 }
