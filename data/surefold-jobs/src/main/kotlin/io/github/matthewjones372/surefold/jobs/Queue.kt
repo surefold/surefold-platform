@@ -61,6 +61,20 @@ internal class Queue(private val source: DataSource, private val worker: String)
     }
 
     /**
+     * Returns [job] to pending, to run at [at] with [error] noted. A retry the handler did not [count] gives its
+     * attempt back. Answers false when this worker no longer holds it.
+     */
+    fun retry(job: Claimed, at: Instant, error: String, count: Boolean): Boolean {
+        val now = clock.get().now()
+        return source.connection.use { connection ->
+            connection.prepareStatement(RETRY).use { statement ->
+                statement.bind(listOf(at, error, if (count) 0 else 1, now, job.id, job.attempts, worker))
+                statement.executeUpdate() == 1
+            }
+        }
+    }
+
+    /**
      * Returns each running job whose lease has passed to pending, as a worker that died mid-run left it, and fails into
      * history those that have had every attempt. Answers how many it returned.
      */
@@ -108,6 +122,12 @@ internal class Queue(private val source: DataSource, private val worker: String)
             )
             returning id, tenant_id, kind, payload::text, payload_version, carried::text, run_at, expires_at, priority,
                 attempts, max_attempts
+        """
+
+        const val RETRY = """
+            update surefold_jobs set status = 'pending', run_at = ?, last_error = ?, attempts = attempts - ?,
+                locked_until = null, locked_by = null, updated_at = ?
+            where id = ? and attempts = ? and locked_by = ? and status = 'running'
         """
 
         fun finishing(how: Finished) = """

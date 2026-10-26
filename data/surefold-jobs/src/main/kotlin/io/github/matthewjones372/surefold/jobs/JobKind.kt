@@ -27,5 +27,8 @@ open class JobKind<P>(
         require(concurrency >= 1) { "Job kind \"$name\" must run at least one job at once, not $concurrency." }
     }
 
+    /** This kind with [handler], for [JobHandlers.of]. */
+    fun handledBy(handler: JobHandler<P>): Handled<P> = Handled(this, handler)
+
     override fun toString(): String = "JobKind($name)"
 }
