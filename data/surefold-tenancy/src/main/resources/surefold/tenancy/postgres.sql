@@ -3,6 +3,8 @@
 -- surefold-tenancy's table on Postgres, as a Liquibase changelog: include it from the service's own
 -- (`<include file="surefold/tenancy/postgres.sql"/>`). The row-level security policies on the service's own tables
 -- are the service's to write; docs/tenancy.md has the one to copy.
+-- The same SQL ships for Flyway as flyway/V<n>__<changeset>.sql beside this file: a new changeset here is a new
+-- script there, and surefold-app-flyway's SurefoldSchemaSuite fails until both leave the same catalog.
 
 --changeset surefold:tenancy-audit
 -- Every transaction run across tenants (spec 0225): who ran it, why, and when. Written in that transaction, so a

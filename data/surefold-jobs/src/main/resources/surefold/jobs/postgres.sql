@@ -2,6 +2,8 @@
 
 -- surefold-jobs' tables on Postgres 15 or newer, as a Liquibase changelog: include it from the service's own
 -- (`<include file="surefold/jobs/postgres.sql"/>`). Nothing creates these tables at start.
+-- The same SQL ships for Flyway as flyway/V<n>__<changeset>.sql beside this file: a new changeset here is a new
+-- script there, and surefold-app-flyway's SurefoldSchemaSuite fails until both leave the same catalog.
 
 --changeset surefold:jobs
 -- Every job not yet finished (spec 0216). A finished one moves to surefold_jobs_history, freeing its key.

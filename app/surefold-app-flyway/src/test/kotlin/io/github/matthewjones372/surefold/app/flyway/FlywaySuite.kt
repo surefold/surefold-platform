@@ -58,6 +58,10 @@ private fun <T> DataSource.query(sql: String, read: (ResultSet) -> T): T =
         }
     }
 
+private fun DataSource.execute(sql: String) {
+    connection.use { connection -> connection.createStatement().use { it.execute(sql) } }
+}
+
 private fun counting(source: DataSource): Int = source.query("select count(*) from orders") { it.getInt(1) }
 
 object FlywaySuite : Suite() {
@@ -91,7 +95,7 @@ object FlywaySuite : Suite() {
 
         test("an applied script edited since fails the start, naming its checksum") {
             val source = Postgres.empty()
-            migrate(source, SERVICE) shouldBe 1
+            migrate(source, service = SERVICE) shouldBe 1
             val app = single<DataSource> { source } +
                 flyway(service = "classpath:db/edited") +
                 single { _: Migrated -> Orders(0) }
@@ -101,9 +105,29 @@ object FlywaySuite : Suite() {
             }
         }
 
+        test("a first script that meets a table already there fails, rather than being skipped") {
+            val source = Postgres.empty()
+            source.execute("create table orders (id integer primary key)")
+
+            shouldThrow<FlywayException>({ migrate(source, service = SERVICE) }) { refused ->
+                refused.message shouldContain "already exists"
+            }
+        }
+
+        test("a database with Liquibase's history is refused, naming the setting that hands it over") {
+            val source = Postgres.empty()
+            source.execute("create table databasechangelog (id text)")
+            val app = single<DataSource> { source } + flyway(service = SERVICE) + single { _: Migrated -> Orders(0) }
+
+            app.use { _: Orders -> }.leftOrNull().shouldNotBeNull { refused ->
+                refused.toString() shouldContain "fromLiquibase"
+            }
+            source.hasTable("flyway_schema_history") shouldBe false
+        }
+
         test("clean is disabled, so nothing can drop the schema") {
             val source = Postgres.empty()
-            migrate(source, SERVICE)
+            migrate(source, service = SERVICE)
 
             shouldThrow<FlywayException>({ configured(source, SERVICE, FlywaySettings()).clean() }) { refused ->
                 refused.message shouldContain "disabled"

@@ -2,6 +2,8 @@
 
 -- surefold-auth's tables on Postgres, as a Liquibase changelog: include it from the service's own
 -- (`<include file="surefold/auth/postgres.sql"/>`). Nothing creates them at start.
+-- The same SQL ships for Flyway as flyway/V<n>__<changeset>.sql beside this file: a new changeset here is a new
+-- script there, and surefold-app-flyway's SurefoldSchemaSuite fails until both leave the same catalog.
 
 --changeset surefold:auth-sessions
 -- One row per session (spec 0227). The token itself is never stored, only its SHA-256, so the table signs no one in.

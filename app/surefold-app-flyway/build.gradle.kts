@@ -10,6 +10,12 @@ dependencies {
     // A real Postgres, in a container.
     testImplementation(testFixtures(project(":surefold-actor-journal-jdbc")))
     testImplementation(project(":surefold-assert"))
+    // The data modules whose Flyway scripts SurefoldSchemaSuite holds equal to their Liquibase changelogs.
+    testImplementation(project(":surefold-tenancy"))
+    testImplementation(project(":surefold-jobs"))
+    testImplementation(project(":surefold-idempotency"))
+    testImplementation(project(":surefold-ratelimit"))
+    testImplementation(project(":surefold-auth"))
 }
 
 tasks.test {
