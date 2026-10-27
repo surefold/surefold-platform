@@ -27,7 +27,8 @@ import kotlin.time.toJavaDuration
 
 /**
  * How a [JobWorker] runs. A run's lease is its kind's deadline plus [leaseMargin], so a worker that is slow to write
- * its result back is not mistaken for a dead one.
+ * its result back is not mistaken for a dead one. With [perTenant], a claim takes at most that many of one tenant's
+ * jobs, so one tenant's burst does not hold every other tenant's jobs behind it.
  */
 data class JobSettings(
     val poll: Duration = 1.seconds,
@@ -35,6 +36,7 @@ data class JobSettings(
     val drain: Duration = 30.seconds,
     val housekeeping: Duration = 1.minutes,
     val retention: Duration = 7.days,
+    val perTenant: Int? = null,
 )
 
 /**
@@ -120,8 +122,12 @@ class JobWorker(
     internal fun claimAndRun(): Int {
         val claimed = handlers.byName.values.flatMap { handled ->
             val room = handled.kind.concurrency - running.getValue(handled.kind.name).get()
-            if (room <= 0) emptyList() else queue.claim(room, lease(handled.kind.deadline), Kinds.Only(handled.kind))
-        } + queue.claim(UNHANDLED_BATCH, lease(ZERO), Kinds.Except(handlers.byName.keys))
+            if (room <= 0) {
+                emptyList()
+            } else {
+                queue.claim(room, lease(handled.kind.deadline), Kinds.Only(handled.kind), settings.perTenant)
+            }
+        } + queue.claim(UNHANDLED_BATCH, lease(ZERO), Kinds.Except(handlers.byName.keys), settings.perTenant)
         claimed.forEach(::dispatch)
         return claimed.size
     }

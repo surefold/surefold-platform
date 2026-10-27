@@ -51,7 +51,7 @@ internal class Queue(private val source: DataSource, private val worker: String)
      * Claims up to [limit] due jobs, highest priority and then earliest first, and holds each for [lease]. Rows
      * another worker is claiming are skipped rather than waited on.
      */
-    fun claim(limit: Int, lease: Duration, kinds: Kinds = Kinds.All): List<Claimed> {
+    fun claim(limit: Int, lease: Duration, kinds: Kinds = Kinds.All, perTenant: Int? = null): List<Claimed> {
         val now = clock.get().now()
         val (filter, names) = when (kinds) {
             Kinds.All -> "" to emptyList()
@@ -59,8 +59,10 @@ internal class Queue(private val source: DataSource, private val worker: String)
             is Kinds.Except -> "and kind <> all(?)" to listOf(kinds.names.toList())
         }
         return source.connection.use { connection ->
-            connection.prepareStatement(claiming(filter)).use { statement ->
-                statement.bind(listOf(now + lease.toJavaDuration(), worker, now, now) + names + limit)
+            val sql = if (perTenant == null) claiming(filter) else claimingFairly(filter)
+            connection.prepareStatement(sql).use { statement ->
+                val bounds = if (perTenant == null) listOf(limit) else listOf(limit * CANDIDATES, perTenant, limit)
+                statement.bind(listOf(now + lease.toJavaDuration(), worker, now, now) + names + bounds)
                 statement.executeQuery().use { rows ->
                     generateSequence { if (rows.next()) rows.claimed() else null }.toList()
                 }
@@ -156,6 +158,31 @@ internal class Queue(private val source: DataSource, private val worker: String)
             where id in (
                 select id from surefold_jobs where status = 'pending' and run_at <= ? $filter
                 order by priority desc, run_at limit ? for update skip locked
+            )
+            returning id, tenant_id, kind, payload::text, payload_version, carried::text, run_at, expires_at, priority,
+                attempts, max_attempts
+        """
+
+        /** How many due jobs a fair claim ranks, per job it may take: a backlog of millions costs a bounded scan. */
+        const val CANDIDATES = 20
+
+        // At most perTenant from each tenant, ranked within it as a plain claim orders; no tenant is one tenant.
+        fun claimingFairly(filter: String) = """
+            update surefold_jobs
+            set status = 'running', locked_until = ?, locked_by = ?, attempts = attempts + 1, updated_at = ?
+            where id in (
+                select id from surefold_jobs where id in (
+                    select id from (
+                        select id, priority, run_at,
+                            row_number() over (partition by tenant_id order by priority desc, run_at) as place
+                        from (
+                            select id, tenant_id, priority, run_at from surefold_jobs
+                            where status = 'pending' and run_at <= ? $filter
+                            order by priority desc, run_at limit ?
+                        ) candidates
+                    ) ranked
+                    where place <= ? order by priority desc, run_at limit ?
+                ) and status = 'pending' for update skip locked
             )
             returning id, tenant_id, kind, payload::text, payload_version, carried::text, run_at, expires_at, priority,
                 attempts, max_attempts
