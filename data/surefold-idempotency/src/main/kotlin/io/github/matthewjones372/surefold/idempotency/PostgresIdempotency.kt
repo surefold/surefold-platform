@@ -75,6 +75,15 @@ class PostgresIdempotency(private val source: DataSource, private val lease: Dur
         }
     }
 
+    /** Deletes every key past its expiry, except one whose request is still running on a live lease. */
+    fun prune(): Int = source.connection.use { connection ->
+        val now = clock.get().now()
+        connection.prepareStatement(PRUNE).use { statement ->
+            statement.bind(now, now)
+            statement.executeUpdate()
+        }
+    }
+
     private fun ResultSet.response(): StoredResponse {
         val names = getArray("header_names").array as Array<*>
         val values = getArray("header_values").array as Array<*>
@@ -112,6 +121,11 @@ class PostgresIdempotency(private val source: DataSource, private val lease: Dur
             update surefold_idempotency set status = 'done', locked_until = null, response_status = ?,
                 header_names = ?, header_values = ?, body = ?
             where scope = ? and key = ? and holder = ? and status = 'running'
+        """
+
+        const val PRUNE = """
+            delete from surefold_idempotency
+            where expires_at <= ? and (status = 'done' or locked_until <= ?)
         """
 
         const val RELEASE =
