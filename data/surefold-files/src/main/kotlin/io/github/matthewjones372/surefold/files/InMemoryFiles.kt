@@ -44,7 +44,7 @@ class InMemoryFiles(override val maxSize: Long = Long.MAX_VALUE) : Files {
         require(limit >= 1) { "A listing takes at least one file, not $limit." }
         val from = if (after == null) stored.tailMap(prefix, true) else stored.tailMap(maxOf(prefix, after), false)
         val matching = from.entries.asSequence().takeWhile { it.key.startsWith(prefix) }.take(limit + 1).toList()
-        val page = matching.take(limit).map { it.value.meta }
+        val page = matching.take(limit).map { it.value.meta.copy(contentType = null) }
         return FilePage(page, if (matching.size > limit) page.last().key.value else null).right()
     }
 
