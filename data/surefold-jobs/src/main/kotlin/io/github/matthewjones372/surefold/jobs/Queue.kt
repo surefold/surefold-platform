@@ -28,6 +28,7 @@ internal data class Claimed(
     val maxAttempts: Int,
     val recurrence: Cron? = null,
     val progress: Progress = Progress(),
+    val dryRun: Boolean = false,
 )
 
 /** How many jobs of a kind are due and waiting, and how long the oldest has waited past its run time. */
@@ -259,6 +260,7 @@ internal class Queue(private val source: DataSource, private val worker: String)
         maxAttempts = getInt("max_attempts"),
         recurrence = getString("recurrence")?.let(Cron::read),
         progress = Progress(getLong("progress_done"), getObject("progress_total") as Long?),
+        dryRun = getBoolean("dry_run"),
     )
 
     private fun ResultSet.instant(column: String): Instant? = getObject(column, OffsetDateTime::class.java)?.toInstant()
@@ -272,7 +274,8 @@ internal class Queue(private val source: DataSource, private val worker: String)
                 order by priority desc, run_at limit ? for update skip locked
             )
             returning id, tenant_id, kind, dedupe_key, payload::text, payload_version, carried::text, run_at,
-                expires_at, priority, attempts, max_attempts, recurrence, progress_done, progress_total
+                expires_at, priority, attempts, max_attempts, recurrence, progress_done, progress_total,
+                dry_run
         """
 
         /** How many due jobs a fair claim ranks, per job it may take: a backlog of millions costs a bounded scan. */
@@ -297,7 +300,8 @@ internal class Queue(private val source: DataSource, private val worker: String)
                 ) and status = 'pending' for update skip locked
             )
             returning id, tenant_id, kind, dedupe_key, payload::text, payload_version, carried::text, run_at,
-                expires_at, priority, attempts, max_attempts, recurrence, progress_done, progress_total
+                expires_at, priority, attempts, max_attempts, recurrence, progress_done, progress_total,
+                dry_run
         """
 
         const val PROCEED = """
