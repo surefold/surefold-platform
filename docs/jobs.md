@@ -111,6 +111,21 @@ The bucket is a row in `surefold_jobs_buckets`, shared by every worker on every 
 the row, refills it from the clock, claims no more jobs than it holds whole tokens, and takes what it claimed, in one
 transaction. A kind's `concurrency` still bounds how many run at once on one worker.
 
+## On a timetable
+
+A `CronEntry` runs a kind on a five-field cron in a time zone. Every worker given the entry enqueues its coming
+firings on each housekeeping pass, each keyed `cron:<name>:<instant>`, so however many instances run, each firing runs
+once. A firing missed while no worker was running is not caught up.
+
+```kotlin
+val prune = CronEntry("prune-holds", Cron.parse("*/5 * * * *", ZoneOffset.UTC), PruneHolds, Unit)
+jobWorker(handlers, cron = listOf(prune))
+```
+
+A cron reads minute, hour, day of month, month and weekday, each `*`, a number, a range `a-b`, any of those with a
+step `/n`, or a list. When the clocks go forward over a firing's local time, it fires at the first instant after the
+gap; when they go back over it, it fires once, at the earlier of the two.
+
 ## Retries and failures
 
 | What happened | What the job does |
