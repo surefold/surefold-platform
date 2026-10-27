@@ -168,7 +168,7 @@ The audit row in `surefold_jobs_operations` is kept after the job's history is p
 
 | What happened | What the job does |
 |---|---|
-| `Retry(after, reason)` | runs again after `after`, without using up an attempt |
+| `Retry(after, reason)` | runs again after `after`, using up an attempt; on its last attempt it fails with `reason` |
 | `Continue(payload, after, progress)` | stores the payload, adds the progress, and runs again after `after`, without using up an attempt |
 | the handler threw, or missed its deadline | runs again after the backoff for that attempt, doubling from a second with jitter; fails on its last attempt (`maxAttempts`, five by default) |
 | `Skip` | moves to history as `skipped` |

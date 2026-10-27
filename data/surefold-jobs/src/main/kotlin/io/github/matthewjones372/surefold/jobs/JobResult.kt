@@ -9,7 +9,7 @@ sealed interface JobResult {
     /** The job is finished. */
     data object Done : JobResult
 
-    /** Run it again after [after]. Asked for by the handler, so it does not use up an attempt. */
+    /** Run it again after [after]. It uses up an attempt, so a job that never stops asking fails on its last. */
     data class Retry(val after: Duration, val reason: String) : JobResult
 
     /** The job no longer needs doing. */
@@ -20,7 +20,8 @@ sealed interface JobResult {
 
     /**
      * More of the job is left: store [payload], a cursor saying where it got to, add [progress] to its counters, and
-     * run it again after [after]. Like [Retry], it uses no attempt. A crash after this resumes from [payload].
+     * run it again after [after]. Unlike [Retry], it uses no attempt: it is progress. A crash after this resumes from
+     * [payload].
      */
     data class Continue<P>(val payload: P, val after: Duration = Duration.ZERO, val progress: Progress = Progress()) :
         JobResult

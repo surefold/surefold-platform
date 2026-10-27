@@ -25,7 +25,8 @@ internal val defaultBackoff: Schedule<Unit, Any?> = Schedule.exponential<Unit>(1
 /**
  * Runs claimed jobs through [handlers] and writes what each decided back through [queue]. A job past its expiry is
  * skipped without a run. One of a kind nothing handles, or with a payload its codec cannot read, fails at once. A
- * run that throws or misses its deadline is retried after [backoff]'s delay for its attempt, and fails on its last.
+ * run that throws or misses its deadline is retried after [backoff]'s delay for its attempt, and one that answers
+ * Retry after the delay it asks for; either fails on its last attempt.
  */
 internal class JobRun(
     private val queue: Queue,
@@ -81,8 +82,13 @@ internal class JobRun(
 
             is JobResult.Fail -> failed(claimed, result.reason)
 
-            is JobResult.Retry -> "retry".also {
-                queue.retry(claimed, clock.get().now() + result.after.toJavaDuration(), result.reason, count = false)
+            // A handler that answers Retry for ever is failed once its attempts are spent, as a throwing one is.
+            is JobResult.Retry -> when {
+                claimed.attempts < claimed.maxAttempts -> "retry".also {
+                    queue.retry(claimed, clock.get().now() + result.after.toJavaDuration(), result.reason, count = true)
+                }
+
+                else -> failed(claimed, "${result.reason}, on attempt ${claimed.attempts} of ${claimed.maxAttempts}")
             }
 
             is JobResult.Continue<*> -> "continue".also {

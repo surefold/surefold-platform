@@ -52,16 +52,22 @@ object JobRunSuite : Suite() {
                 .shouldContainExactly(listOf("done done -", "fail failed cannot", "skip skipped not wanted"))
         }
 
-        test("a Retry the handler asks for runs again after its delay, and gives its attempt back") {
+        test("a Retry the handler asks for runs again after its delay, using an attempt, and fails on its last") {
             val source = jobsDatabase()
             val handlers = JobHandlers.of(Remind.handledBy { JobResult.Retry(5.minutes, "busy") })
-            clock.locally(TestClock(noon)) {
-                source.committed { Jobs.enqueue(it, Remind, "call sam", "sam", maxAttempts = 1) }
+            val time = TestClock(noon)
+            clock.locally(time) {
+                source.committed { Jobs.enqueue(it, Remind, "call sam", "sam", maxAttempts = 2) }
+                source.runAll(handlers)
+                source.column("select status || ' ' || attempts || ' ' || last_error from surefold_jobs") shouldBe
+                    listOf("pending 1 busy")
+                source.column("select run_at from surefold_jobs") shouldBe
+                    listOf(Timestamp.from(noon.plusSeconds(300)))
+                time.setTime(noon.plusSeconds(300))
                 source.runAll(handlers)
             }
-            source.column("select status || ' ' || attempts || ' ' || last_error from surefold_jobs") shouldBe
-                listOf("pending 0 busy")
-            source.column("select run_at from surefold_jobs") shouldBe listOf(Timestamp.from(noon.plusSeconds(300)))
+            source.column("select status || ' ' || attempts || ': ' || last_error from surefold_jobs_history") shouldBe
+                listOf("failed 2: busy, on attempt 2 of 2")
         }
 
         test("a throwing handler is retried with growing delays, and fails on its last attempt") {
