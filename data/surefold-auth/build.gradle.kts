@@ -5,6 +5,9 @@
 dependencies {
     api(project(":surefold"))
     implementation("org.bouncycastle:bcprov-jdk18on:1.85")
+
+    testImplementation(testFixtures(project(":surefold-actor-journal-jdbc")))
+    testImplementation("org.liquibase:liquibase-core:4.32.0")
 }
 
 tasks.test {
