@@ -99,6 +99,18 @@ fun reminders(mailer: Mailer): Module =
 - **The worker** is a node after `Migrated`. Released, it stops claiming, waits up to `JobSettings.drain` for runs in
   flight, and interrupts what is left; those leases expire and another worker runs them again.
 
+## A rate across every instance
+
+A kind that calls an outside provider can carry the provider's limit:
+
+```kotlin
+object ChargeCard : JobKind<Charge>("charge-card", ChargeCodec, rate = JobRate(10, per = 1.seconds, burst = 20))
+```
+
+The bucket is a row in `surefold_jobs_buckets`, shared by every worker on every instance. A claim for the kind locks
+the row, refills it from the clock, claims no more jobs than it holds whole tokens, and takes what it claimed, in one
+transaction. A kind's `concurrency` still bounds how many run at once on one worker.
+
 ## Retries and failures
 
 | What happened | What the job does |
@@ -122,6 +134,7 @@ fun reminders(mailer: Mailer): Module =
 | `drain` | 30s | how long release waits for runs in flight |
 | `housekeeping` | 1m | how often expired leases are swept, history pruned and the backlog measured |
 | `retention` | 7d | how long finished jobs stay in history |
+| `listen` | true | hold one connection that `LISTEN`s, so a job enqueued to run now starts at once rather than at the next poll; needs the Postgres JDBC driver, and falls back to polling on any other |
 | `perTenant` | none | at most this many of one tenant's jobs in a claim, so one tenant's burst cannot hold the others behind it; jobs with no tenant count as one tenant |
 
 ## Metrics

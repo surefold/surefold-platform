@@ -32,7 +32,7 @@ object Jobs {
     ): Boolean {
         require(maxAttempts >= 1) { "A job needs at least one attempt, not $maxAttempts." }
         val now = clock.get().now()
-        return connection.prepareStatement(ENQUEUE).use { statement ->
+        val enqueued = connection.prepareStatement(ENQUEUE).use { statement ->
             statement.bind(
                 listOf(
                     uuidV7(now), tenant, kind.name, dedupeKey, kind.codec.encode(payload), kind.codec.version,
@@ -41,6 +41,14 @@ object Jobs {
             )
             statement.executeUpdate() == 1
         }
+        // Postgres delivers a notification only when the transaction that sent it commits.
+        if (enqueued && runAt <= now) {
+            connection.prepareStatement("select pg_notify('$CHANNEL', ?)").use { statement ->
+                statement.bind(listOf(kind.name))
+                statement.execute()
+            }
+        }
+        return enqueued
     }
 
     /** Cancels the waiting job with this key into history. Answers false when none waits: a running one runs on. */
@@ -86,6 +94,9 @@ object Jobs {
     private fun rescheduling(tenant: String?) =
         "update surefold_jobs set run_at = ?, updated_at = ? where status = 'pending' and ${keyed(tenant)}"
 }
+
+/** What an enqueue of a job due now notifies, and what a worker listens on. */
+internal const val CHANNEL = "surefold_jobs"
 
 /** The columns a job keeps as they were when it moves to history. */
 private const val KEPT = "id, tenant_id, kind, dedupe_key, payload, payload_version, carried, run_at, expires_at, " +
