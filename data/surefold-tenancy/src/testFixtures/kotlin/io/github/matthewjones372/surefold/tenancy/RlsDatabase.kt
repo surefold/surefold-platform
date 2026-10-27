@@ -11,11 +11,11 @@ import java.sql.Connection
 import javax.sql.DataSource
 
 /**
- * A fresh database with a `bookings` table under a forced tenant policy, the tenancy changelog applied, and three ways
- * in: [owner], a superuser that row-level security never binds; [app], a role it binds; and [system], a role with
- * BYPASSRLS. The policy is the one docs/tenancy.md gives to copy.
+ * A fresh database with the tenancy changelog applied, and three ways in: [owner], a superuser that row-level
+ * security never binds; [app], a role it binds; and [system], a role with BYPASSRLS. With [bookings], it has a
+ * `bookings` table under a forced tenant policy, the one docs/tenancy.md gives to copy.
  */
-class RlsDatabase {
+class RlsDatabase(bookings: Boolean = true) {
     private val address = Postgres.emptyUrl()
 
     val owner: DataSource = source(user = null)
@@ -24,13 +24,30 @@ class RlsDatabase {
 
     init {
         check(rolesMade)
-        owner.connection.use { connection -> connection.createStatement().use { it.execute(TABLE) } }
+        apply("surefold/tenancy/postgres.sql")
+        execute(GRANTS)
+        if (bookings) {
+            execute(TABLE)
+            grantTo("bookings")
+        }
+    }
+
+    /** Applies [changelog], a classpath resource, as the owner. */
+    fun apply(changelog: String) {
         // Liquibase closes the connection it is handed.
         owner.connection.use { connection ->
             val database = DatabaseFactory.getInstance().findCorrectDatabaseImplementation(JdbcConnection(connection))
-            Liquibase("surefold/tenancy/postgres.sql", ClassLoaderResourceAccessor(), database).use { it.update() }
+            Liquibase(changelog, ClassLoaderResourceAccessor(), database).use { it.update() }
         }
-        owner.connection.use { connection -> connection.createStatement().use { it.execute(GRANTS) } }
+    }
+
+    /** Lets the application and system roles read and write [table]. */
+    fun grantTo(table: String) =
+        execute("grant select, insert, update, delete on $table to surefold_app, surefold_system")
+
+    /** Runs [sql] as the owner. */
+    fun execute(sql: String) {
+        owner.connection.use { connection -> connection.createStatement().use { it.execute(sql) } }
     }
 
     private fun source(user: String?): DataSource = PGSimpleDataSource().also { source ->
@@ -73,7 +90,6 @@ class RlsDatabase {
         """
 
         const val GRANTS = """
-            grant select, insert, update, delete on bookings to surefold_app, surefold_system;
             grant insert on surefold_tenancy_audit to surefold_system;
             grant select on surefold_tenancy_audit to surefold_app, surefold_system;
         """
