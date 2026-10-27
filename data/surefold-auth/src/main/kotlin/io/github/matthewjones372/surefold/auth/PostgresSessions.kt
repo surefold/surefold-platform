@@ -1,11 +1,9 @@
 package io.github.matthewjones372.surefold.auth
 
 import io.github.matthewjones372.surefold.clock
-import java.sql.PreparedStatement
 import java.sql.ResultSet
 import java.time.Instant
 import java.time.OffsetDateTime
-import java.time.ZoneOffset
 import java.util.UUID
 import javax.sql.DataSource
 import kotlin.time.toJavaDuration
@@ -76,7 +74,7 @@ class PostgresSessions(
 
     private fun update(sql: String, vararg values: Any?): Int = source.connection.use { connection ->
         connection.prepareStatement(sql).use { statement ->
-            statement.bind(values)
+            statement.bind(*values)
             statement.executeUpdate()
         }
     }
@@ -84,14 +82,10 @@ class PostgresSessions(
     private fun <T> query(sql: String, vararg values: Any?, read: (ResultSet) -> T): T =
         source.connection.use { connection ->
             connection.prepareStatement(sql).use { statement ->
-                statement.bind(values)
+                statement.bind(*values)
                 statement.executeQuery().use(read)
             }
         }
-
-    private fun PreparedStatement.bind(values: Array<out Any?>) = values.forEachIndexed { at, value ->
-        setObject(at + 1, if (value is Instant) value.atOffset(ZoneOffset.UTC) else value)
-    }
 
     private companion object {
         const val CREATE = """

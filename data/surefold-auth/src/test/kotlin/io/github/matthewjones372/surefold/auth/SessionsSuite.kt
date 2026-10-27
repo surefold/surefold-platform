@@ -114,7 +114,7 @@ object SessionsSuite : Suite() {
         }
     }
 
-    private fun database(): DataSource = Postgres.empty().also { source ->
+    fun database(): DataSource = Postgres.empty().also { source ->
         source.connection.use { connection ->
             val database = DatabaseFactory.getInstance().findCorrectDatabaseImplementation(JdbcConnection(connection))
             Liquibase("surefold/auth/postgres.sql", ClassLoaderResourceAccessor(), database).use { it.update() }
