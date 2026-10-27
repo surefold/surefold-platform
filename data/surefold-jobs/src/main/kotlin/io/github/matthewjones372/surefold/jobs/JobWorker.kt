@@ -43,7 +43,8 @@ data class JobSettings(
 
 /**
  * Claims due jobs every [JobSettings.poll], up to each kind's concurrency, and runs each on a virtual thread with the
- * bindings [start] was called with. Every [JobSettings.housekeeping] it sweeps expired leases and prunes history.
+ * bindings [start] was called with. Every [JobSettings.housekeeping] it sweeps expired leases, prunes history, and
+ * enqueues the coming firings of each of its [cron] entries.
  *
  * [close] stops claiming and waits up to [JobSettings.drain] for runs in flight, then interrupts the rest: their
  * leases expire and another worker runs them again, which is why a handler must be idempotent.
@@ -53,6 +54,7 @@ class JobWorker(
     private val handlers: JobHandlers,
     private val settings: JobSettings = JobSettings(),
     val name: String = "${ProcessHandle.current().pid()}-${UUID.randomUUID()}",
+    private val cron: List<CronEntry<*>> = emptyList(),
 ) : AutoCloseable {
 
     private val queue = Queue(source, name)
@@ -87,6 +89,7 @@ class JobWorker(
                 if (clock.get().now() >= housekeepingDue) {
                     queue.sweep()
                     queue.prune(settings.retention)
+                    enqueueCron()
                     measureBacklog()
                     housekeepingDue = clock.get().now() + settings.housekeeping.toJavaDuration()
                 }
@@ -128,6 +131,9 @@ class JobWorker(
         woken = true
         sleeping?.interrupt()
     }
+
+    /** Enqueues every cron entry's firings up to the housekeeping after next, so none falls between two passes. */
+    internal fun enqueueCron() = cron.forEach { entry -> entry.enqueueAhead(source, settings.housekeeping * 2) }
 
     /** Sets each handled kind's depth and lag, zero for one with nothing due, so a drained queue reads as drained. */
     internal fun measureBacklog() {
