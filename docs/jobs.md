@@ -200,6 +200,14 @@ The audit row in `surefold_jobs_operations` is kept after the job's history is p
 | `surefold.jobs.depth` | gauge, jobs due and waiting | `kind` |
 | `surefold.jobs.lag.seconds` | gauge, how long the oldest due job has waited | `kind` |
 
+## Traces
+
+With `surefold-jobs-otel` on the classpath, each run is a span named `job <kind>`, with the job's id, kind, tenant,
+attempt and result as attributes, and an error status when it failed. It starts a trace of its own with a **link** to
+the span that enqueued the job, rather than a parent: a job run an hour later in another process is not part of the
+request's latency. The handler's own spans are its children. It uses the global `OpenTelemetry`; a worker given
+`watchers = listOf(JobSpans(tracer))` uses that tracer instead.
+
 ## Time
 
 Everything reads `clock`: what `enqueue` writes as the run time and the lease, what a claim counts as due, and how
