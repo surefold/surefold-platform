@@ -98,6 +98,7 @@ internal class JobRun(
         runAt = claimed.runAt,
         attempt = claimed.attempts,
         progress = claimed.progress,
+        dryRun = claimed.dryRun,
     )
 
     private fun retried(claimed: Claimed, error: String) {

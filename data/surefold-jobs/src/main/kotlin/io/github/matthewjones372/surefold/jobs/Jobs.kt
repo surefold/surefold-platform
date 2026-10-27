@@ -6,7 +6,9 @@ import java.sql.Connection
 import java.sql.PreparedStatement
 import java.sql.Types
 import java.time.Instant
+import java.time.OffsetDateTime
 import java.time.ZoneOffset
+import java.util.UUID
 
 /**
  * Enqueues, cancels and reschedules jobs on the caller's [Connection], so each commits or rolls back with the
@@ -41,15 +43,70 @@ object Jobs {
             )
             statement.executeUpdate() == 1
         }
-        // Postgres delivers a notification only when the transaction that sent it commits.
-        if (enqueued && runAt <= now) {
-            connection.prepareStatement("select pg_notify('$CHANNEL', ?)").use { statement ->
-                statement.bind(listOf(kind.name))
-                statement.execute()
-            }
-        }
+        if (enqueued && runAt <= now) notify(connection, kind)
         return enqueued
     }
+
+    // Postgres delivers a notification only when the transaction that sent it commits.
+    private fun notify(connection: Connection, kind: JobKind<*>) =
+        connection.prepareStatement("select pg_notify('$CHANNEL', ?)").use { statement ->
+            statement.bind(listOf(kind.name))
+            statement.execute()
+        }
+
+    /**
+     * Starts a long-running operation: a job of [kind] from [payload], due now, and an audit row saying [startedBy]
+     * started it with that payload, and whether as a [dryRun], both in the caller's transaction. Answers the
+     * operation's id, which is its job's, for [operation].
+     */
+    fun <P> startOperation(
+        connection: Connection,
+        kind: JobKind<P>,
+        payload: P,
+        startedBy: String,
+        dryRun: Boolean = false,
+        maxAttempts: Int = 5,
+        tenant: String? = null,
+    ): UUID {
+        val now = clock.get().now()
+        val id = uuidV7(now)
+        val json = kind.codec.encode(payload)
+        connection.prepareStatement(START_OPERATION).use { statement ->
+            statement.bind(
+                listOf(
+                    id, tenant, kind.name, "operation:$id", json, kind.codec.version, Carried.write(Carriers.capture()),
+                    now, maxAttempts, dryRun, now, now,
+                ),
+            )
+            statement.executeUpdate()
+        }
+        connection.prepareStatement(AUDIT_OPERATION).use { statement ->
+            statement.bind(listOf(id, tenant, kind.name, startedBy, json, dryRun, now))
+            statement.executeUpdate()
+        }
+        notify(connection, kind)
+        return id
+    }
+
+    /** What [id], an operation [startOperation] started, has done so far, and who started it; null if no such one. */
+    fun operation(connection: Connection, id: UUID): Operation? =
+        connection.prepareStatement(OPERATION).use { statement ->
+            statement.bind(listOf(id))
+            statement.executeQuery().use { rows ->
+                if (!rows.next()) return@use null
+                Operation(
+                    id = id,
+                    kind = rows.getString("kind"),
+                    startedBy = rows.getString("started_by"),
+                    parameters = rows.getString("parameters"),
+                    dryRun = rows.getBoolean("dry_run"),
+                    startedAt = rows.getObject("started_at", OffsetDateTime::class.java).toInstant(),
+                    status = rows.getString("status") ?: "pruned",
+                    progress = Progress(rows.getLong("progress_done"), rows.getObject("progress_total") as Long?),
+                    lastError = rows.getString("last_error"),
+                )
+            }
+        }
 
     /**
      * Enqueues [payload] as the first occurrence of a series on [rule]: when an occurrence finishes, done, skipped or
@@ -111,6 +168,30 @@ object Jobs {
         on conflict on constraint surefold_jobs_key do nothing
     """
 
+    private const val START_OPERATION = """
+        insert into surefold_jobs (id, tenant_id, kind, dedupe_key, payload, payload_version, carried, run_at,
+            priority, status, max_attempts, dry_run, created_at, updated_at)
+        values (?, ?::text, ?, ?, ?::jsonb, ?, ?::jsonb, ?, 0, 'pending', ?, ?, ?, ?)
+    """
+
+    private const val AUDIT_OPERATION = """
+        insert into surefold_jobs_operations (id, tenant_id, kind, started_by, parameters, dry_run, started_at)
+        values (?, ?::text, ?, ?, ?::jsonb, ?, ?)
+    """
+
+    // The job while it runs, then its history, then nothing once history is pruned: the audit row outlives both.
+    private const val OPERATION = """
+        select o.kind, o.started_by, o.parameters::text, o.dry_run, o.started_at,
+            coalesce(j.status, h.status) as status,
+            coalesce(j.progress_done, h.progress_done, 0) as progress_done,
+            coalesce(j.progress_total, h.progress_total) as progress_total,
+            coalesce(j.last_error, h.last_error) as last_error
+        from surefold_jobs_operations o
+        left join surefold_jobs j on j.id = o.id
+        left join surefold_jobs_history h on h.id = o.id
+        where o.id = ?
+    """
+
     private const val ENQUEUE_RECURRING = """
         insert into surefold_jobs (id, tenant_id, kind, dedupe_key, payload, payload_version, carried, run_at,
             priority, status, max_attempts, recurrence, created_at, updated_at)
@@ -136,7 +217,7 @@ internal const val CHANNEL = "surefold_jobs"
 
 /** The columns a job keeps as they were when it moves to history. */
 private const val KEPT = "id, tenant_id, kind, dedupe_key, payload, payload_version, carried, run_at, expires_at, " +
-    "priority, attempts, max_attempts, locked_by, created_at, progress_done, progress_total"
+    "priority, attempts, max_attempts, locked_by, created_at, progress_done, progress_total, dry_run"
 
 /**
  * Inserts the rows of [rows], a CTE of deleted jobs, into history as [status]. Takes three parameters: an error that
@@ -158,3 +239,20 @@ internal fun PreparedStatement.bind(values: List<Any?>) {
         }
     }
 }
+
+/**
+ * A long-running operation as its audit row and its job say: who started it, with what [parameters] (the starting
+ * payload's JSON) and whether as a dry run; its job's [status], `pending`, `running`, a finished status, or `pruned`
+ * once history has let it go; and its [progress].
+ */
+data class Operation(
+    val id: UUID,
+    val kind: String,
+    val startedBy: String,
+    val parameters: String,
+    val dryRun: Boolean,
+    val startedAt: Instant,
+    val status: String,
+    val progress: Progress,
+    val lastError: String?,
+)

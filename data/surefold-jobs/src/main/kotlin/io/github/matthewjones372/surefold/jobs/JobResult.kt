@@ -29,7 +29,10 @@ sealed interface JobResult {
 /** How far a job has got: [done] is added up across its runs, and [total], when a run knows it, is kept. */
 data class Progress(val done: Long = 0, val total: Long? = null)
 
-/** One run of a job, as its handler sees it. [attempt] counts from one; [progress] is what earlier runs added up. */
+/**
+ * One run of a job, as its handler sees it. [attempt] counts from one; [progress] is what earlier runs added up; and
+ * [dryRun] says the operation was started to show what it would do, so the handler must change nothing.
+ */
 class Job<P>(
     val id: UUID,
     val kind: JobKind<P>,
@@ -38,6 +41,7 @@ class Job<P>(
     val runAt: Instant,
     val attempt: Int,
     val progress: Progress = Progress(),
+    val dryRun: Boolean = false,
 )
 
 /** Runs one job of a kind. Delivery is at least once: a job can run again after a crash, so this must be idempotent. */

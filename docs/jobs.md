@@ -154,6 +154,16 @@ Backfill.handledBy { job ->
 
 `job.progress` is what earlier runs added up, and history keeps it once the job finishes.
 
+An operator's one-off job, a backfill or a re-send after an outage, is started as an operation, which records who
+started it and with what, and may be a dry run that the handler reads as `job.dryRun` and changes nothing for:
+
+```kotlin
+val id = Jobs.startOperation(connection, Backfill, Cursor(lastId = 0), startedBy = "ops:sam", dryRun = true)
+Jobs.operation(connection, id)    // who, with what, dry run or not, its status and its progress
+```
+
+The audit row in `surefold_jobs_operations` is kept after the job's history is pruned.
+
 ## Retries and failures
 
 | What happened | What the job does |
