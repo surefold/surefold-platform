@@ -11,6 +11,9 @@ dependencies {
 }
 
 tasks.test {
+    // AuthGuideSuite holds docs/auth.md to this module's GuideExample.kt.
+    inputs.file(rootProject.layout.projectDirectory.file("docs/auth.md")).withPropertyName("guide")
+    systemProperty("surefold.auth.repoRoot", rootProject.projectDir.absolutePath)
     val mainRuntime = configurations.runtimeClasspath
     inputs.files(mainRuntime).withPropertyName("mainRuntimeClasspath")
     jvmArgumentProviders.add(
