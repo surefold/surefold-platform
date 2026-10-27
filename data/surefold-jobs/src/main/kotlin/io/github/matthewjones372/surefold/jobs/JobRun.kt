@@ -31,63 +31,75 @@ internal class JobRun(
     private val queue: Queue,
     private val handlers: JobHandlers,
     private val backoff: Schedule<Unit, Any?> = defaultBackoff,
+    private val watchers: List<JobRunWatcher> = JobRunWatchers.registered,
 ) {
 
+    /**
+     * Runs [claimed] under the context its enqueuer carried, inside every watcher, and counts what came of it. The
+     * watchers run inside that context, so a span one starts can link to the enqueuer's.
+     */
     fun run(claimed: Claimed) {
+        val info = JobRunInfo(claimed.id, claimed.kind, claimed.tenant, claimed.attempts)
+        val outcome = Carriers.within(carried(claimed)) { watched(info, watchers) { outcome(claimed) } }
+        counter(RUNS, "kind" to claimed.kind, "result" to outcome).increment()
+    }
+
+    private fun watched(info: JobRunInfo, left: List<JobRunWatcher>, block: () -> String): String =
+        if (left.isEmpty()) block() else left.first().around(info) { watched(info, left.drop(1), block) }
+
+    private fun outcome(claimed: Claimed): String {
         val now = clock.get().now()
         val handled = handlers.byName[claimed.kind]
-        when {
+        return when {
             claimed.expiresAt != null && now > claimed.expiresAt -> {
                 queue.finish(claimed, Finished.Skipped, "expired at ${claimed.expiresAt}")
-                counted(claimed, "skipped")
+                "skipped"
             }
 
             handled == null -> failed(claimed, "no handler for kind \"${claimed.kind}\"")
 
-            else -> timed(DURATION, "kind" to claimed.kind) { run(claimed, handled) }
+            else -> timed(DURATION, "kind" to claimed.kind) { outcome(claimed, handled) }
         }
     }
 
-    private fun <P> run(claimed: Claimed, handled: Handled<P>) {
+    private fun <P> outcome(claimed: Claimed, handled: Handled<P>): String {
         val job = try {
             decoded(claimed, handled.kind)
         } catch (thrown: Exception) {
-            failed(claimed, "its payload could not be read: ${thrown.nonFatalOrThrow()}")
-            return
+            return failed(claimed, "its payload could not be read: ${thrown.nonFatalOrThrow()}")
         }
         val result = try {
-            timeoutOrNull(handled.kind.deadline) {
-                Carriers.within(Carried.read(claimed.carried)) { handled.handler.run(job) }
-            } ?: return retried(claimed, "no answer within ${handled.kind.deadline}")
+            timeoutOrNull(handled.kind.deadline) { handled.handler.run(job) }
+                ?: return retried(claimed, "no answer within ${handled.kind.deadline}")
         } catch (thrown: Exception) {
             return retried(claimed, "it threw ${thrown.nonFatalOrThrow()}")
         }
-        when (result) {
-            JobResult.Done -> {
-                queue.finish(claimed, Finished.Done)
-                counted(claimed, "done")
-            }
+        return when (result) {
+            JobResult.Done -> "done".also { queue.finish(claimed, Finished.Done) }
 
-            is JobResult.Skip -> {
-                queue.finish(claimed, Finished.Skipped, result.reason)
-                counted(claimed, "skipped")
-            }
+            is JobResult.Skip -> "skipped".also { queue.finish(claimed, Finished.Skipped, result.reason) }
 
             is JobResult.Fail -> failed(claimed, result.reason)
 
-            is JobResult.Retry -> {
+            is JobResult.Retry -> "retry".also {
                 queue.retry(claimed, clock.get().now() + result.after.toJavaDuration(), result.reason, count = false)
-                counted(claimed, "retry")
             }
 
-            is JobResult.Continue<*> -> {
+            is JobResult.Continue<*> -> "continue".also {
                 // A handler of P answers a Continue of P: the handler's type says so, and erasure cannot.
                 @Suppress("UNCHECKED_CAST")
                 val next = handled.kind.codec.encode(result.payload as P)
                 queue.proceed(claimed, next, clock.get().now() + result.after.toJavaDuration(), result.progress)
-                counted(claimed, "continue")
             }
         }
+    }
+
+    /** What the enqueuer carried; a row whose context cannot be read runs without it rather than not at all. */
+    private fun carried(claimed: Claimed): Map<String, String> = try {
+        Carried.read(claimed.carried)
+    } catch (unread: IllegalArgumentException) {
+        logWarn("surefold-jobs: job ${claimed.id} runs without its enqueuer's context: ${unread.message}")
+        emptyMap()
     }
 
     private fun <P> decoded(claimed: Claimed, kind: JobKind<P>) = Job(
@@ -101,24 +113,18 @@ internal class JobRun(
         dryRun = claimed.dryRun,
     )
 
-    private fun retried(claimed: Claimed, error: String) {
+    private fun retried(claimed: Claimed, error: String): String {
         val delay = if (claimed.attempts < claimed.maxAttempts) delayAfter(claimed.attempts) else null
-        if (delay == null) {
-            failed(claimed, "$error, on attempt ${claimed.attempts} of ${claimed.maxAttempts}")
-        } else {
-            queue.retry(claimed, clock.get().now() + delay.toJavaDuration(), error, count = true)
-            counted(claimed, "retry")
-        }
+        if (delay == null) return failed(claimed, "$error, on attempt ${claimed.attempts} of ${claimed.maxAttempts}")
+        queue.retry(claimed, clock.get().now() + delay.toJavaDuration(), error, count = true)
+        return "retry"
     }
 
-    private fun failed(claimed: Claimed, error: String) {
+    private fun failed(claimed: Claimed, error: String): String {
         logWarn("surefold-jobs: job ${claimed.id} of kind \"${claimed.kind}\" failed: $error")
         queue.finish(claimed, Finished.Failed, error)
-        counted(claimed, "failed")
+        return "failed"
     }
-
-    private fun counted(claimed: Claimed, result: String) =
-        counter(RUNS, "kind" to claimed.kind, "result" to result).increment()
 
     /** [backoff]'s delay before the attempt after [attempt], or null when it has given up. */
     private fun delayAfter(attempt: Int): Duration? {
