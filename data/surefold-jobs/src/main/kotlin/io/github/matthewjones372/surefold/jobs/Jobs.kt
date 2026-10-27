@@ -136,7 +136,7 @@ internal const val CHANNEL = "surefold_jobs"
 
 /** The columns a job keeps as they were when it moves to history. */
 private const val KEPT = "id, tenant_id, kind, dedupe_key, payload, payload_version, carried, run_at, expires_at, " +
-    "priority, attempts, max_attempts, locked_by, created_at"
+    "priority, attempts, max_attempts, locked_by, created_at, progress_done, progress_total"
 
 /**
  * Inserts the rows of [rows], a CTE of deleted jobs, into history as [status]. Takes three parameters: an error that
