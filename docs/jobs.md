@@ -122,6 +122,7 @@ fun reminders(mailer: Mailer): Module =
 | `drain` | 30s | how long release waits for runs in flight |
 | `housekeeping` | 1m | how often expired leases are swept, history pruned and the backlog measured |
 | `retention` | 7d | how long finished jobs stay in history |
+| `perTenant` | none | at most this many of one tenant's jobs in a claim, so one tenant's burst cannot hold the others behind it; jobs with no tenant count as one tenant |
 
 ## Metrics
 
