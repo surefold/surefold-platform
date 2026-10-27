@@ -126,6 +126,18 @@ A cron reads minute, hour, day of month, month and weekday, each `*`, a number, 
 step `/n`, or a list. When the clocks go forward over a firing's local time, it fires at the first instant after the
 gap; when they go back over it, it fires once, at the earlier of the two.
 
+## A series on a rule
+
+A job can recur on a rule of its own, for a reminder per customer or a digest per tenant at 08:00 in its time zone:
+
+```kotlin
+Jobs.enqueueRecurring(connection, SendDigest, Digest(tenantId), dedupeKey = "digest", rule = Cron.parse("0 8 * * *", zone), tenant = tenantId)
+```
+
+When an occurrence finishes, done, skipped or failed, the next is enqueued with the same key, payload and tenant in
+the transaction that moves this one to history, at the rule's next firing after now. A retry is not a finish, and
+does not move the series on. Cancelling the key ends it.
+
 ## Retries and failures
 
 | What happened | What the job does |

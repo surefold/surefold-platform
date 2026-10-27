@@ -9,6 +9,7 @@ import io.github.matthewjones372.surefold.junit.shouldThrow
 import java.time.Instant
 import java.time.ZoneOffset.UTC
 import java.util.concurrent.atomic.AtomicInteger
+import javax.sql.DataSource
 import kotlin.time.Duration.Companion.minutes
 
 /** System cron entries, enqueued by every worker and run once per firing (spec 0218). */
@@ -30,6 +31,8 @@ object CronEntrySuite : Suite() {
                 repeat(60) {
                     workers.forEach { worker -> worker.enqueueCron() }
                     workers.forEach { worker -> worker.claimAndRun() }
+                    // Runs are asynchronous; one still going as the clock jumps would miss its deadline on it.
+                    source.awaitNoneRunning()
                     time.adjust(1.minutes)
                 }
                 workers.forEach { it.claimAndRun() }
@@ -60,5 +63,9 @@ object CronEntrySuite : Suite() {
         test("an entry needs a name") {
             shouldThrow<IllegalArgumentException> { CronEntry(" ", Cron.parse("* * * * *", UTC), Remind, "x") }
         }
+    }
+
+    private fun DataSource.awaitNoneRunning() {
+        while (column("select count(*) from surefold_jobs where status = 'running'").single() != 0L) Thread.sleep(5)
     }
 }

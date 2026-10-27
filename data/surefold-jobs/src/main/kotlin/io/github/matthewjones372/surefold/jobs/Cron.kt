@@ -71,6 +71,9 @@ class Cron private constructor(
 
     override fun toString(): String = "$expression ($zone)"
 
+    /** How a recurring job's rule is kept in its row: the five fields, then the zone. */
+    internal fun stored(): String = "$expression ${zone.id}"
+
     companion object {
         private const val HORIZON_YEARS = 8L
         private const val DAYS_IN_WEEK = 7
@@ -80,6 +83,10 @@ class Cron private constructor(
         private val DAYS = 1..31
         private val MONTHS = 1..12
         private val WEEKDAYS = 0..7
+
+        /** Reads what [stored] wrote. */
+        internal fun read(stored: String): Cron =
+            parse(stored.substringBeforeLast(' '), ZoneId.of(stored.substringAfterLast(' ')))
 
         /** Reads [expression], and throws [IllegalArgumentException] naming the field it could not read. */
         fun parse(expression: String, zone: ZoneId): Cron {
