@@ -28,7 +28,8 @@ import kotlin.time.toJavaDuration
 /**
  * How a [JobWorker] runs. A run's lease is its kind's deadline plus [leaseMargin], so a worker that is slow to write
  * its result back is not mistaken for a dead one. With [perTenant], a claim takes at most that many of one tenant's
- * jobs, so one tenant's burst does not hold every other tenant's jobs behind it.
+ * jobs, so one tenant's burst does not hold every other tenant's jobs behind it. With [listen], a worker holds one
+ * connection that `LISTEN`s for jobs enqueued to run now, and claims them without waiting for the next poll.
  */
 data class JobSettings(
     val poll: Duration = 1.seconds,
@@ -37,6 +38,7 @@ data class JobSettings(
     val housekeeping: Duration = 1.minutes,
     val retention: Duration = 7.days,
     val perTenant: Int? = null,
+    val listen: Boolean = true,
 )
 
 /**
@@ -47,7 +49,7 @@ data class JobSettings(
  * leases expire and another worker runs them again, which is why a handler must be idempotent.
  */
 class JobWorker(
-    source: DataSource,
+    private val source: DataSource,
     private val handlers: JobHandlers,
     private val settings: JobSettings = JobSettings(),
     val name: String = "${ProcessHandle.current().pid()}-${UUID.randomUUID()}",
@@ -62,6 +64,10 @@ class JobWorker(
     private val lock = ReentrantLock()
     private var stopping = false
     private var sleeping: Thread? = null
+    private var woken = false
+
+    @Volatile
+    private var listener: Listener? = null
 
     @Volatile
     private var loop: CompletableFuture<Unit>? = null
@@ -71,6 +77,7 @@ class JobWorker(
         check(loop == null) { "job worker $name has already started" }
         logInfo("surefold-jobs: worker $name started, handling ${handlers.byName.keys.sorted()}")
         loop = surefoldFuture { polling() }
+        if (settings.listen) listener = Listener(source, settings.poll, ::wake)
     }
 
     private fun polling() {
@@ -95,17 +102,31 @@ class JobWorker(
     private fun pause(): Boolean {
         lock.withLock {
             if (stopping) return false
+            // A notification that came while the loop was claiming means claim again now.
+            if (woken) {
+                woken = false
+                return true
+            }
             sleeping = Thread.currentThread()
         }
         try {
             clock.get().sleep(settings.poll)
         } catch (_: InterruptedException) {
-            // Woken by close.
+            // Woken by close, or by a job enqueued to run now.
         } finally {
             lock.withLock { sleeping = null }
             Thread.interrupted()
         }
-        return lock.withLock { !stopping }
+        return lock.withLock {
+            woken = false
+            !stopping
+        }
+    }
+
+    /** Ends the loop's sleep, or makes its next one end at once: a job is due now. */
+    private fun wake() = lock.withLock {
+        woken = true
+        sleeping?.interrupt()
     }
 
     /** Sets each handled kind's depth and lag, zero for one with nothing due, so a drained queue reads as drained. */
@@ -158,6 +179,7 @@ class JobWorker(
             stopping = true
             sleeping?.interrupt()
         }
+        listener?.close()
         loop?.join()
         val until = System.nanoTime() + settings.drain.inWholeNanoseconds
         inFlight.toList().forEach { future ->
