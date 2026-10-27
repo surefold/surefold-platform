@@ -117,7 +117,7 @@ object TotpSuite : Suite() {
     private fun codeAt(secret: ByteArray, at: Instant) = Totp.code(secret, Totp.step(at))
 
     /** Base32 back to bytes, as the authenticator app does. */
-    private fun decode(secret: Secret): ByteArray {
+    fun decode(secret: Secret): ByteArray {
         val alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
         val bits = secret.reveal().map { alphabet.indexOf(it).toString(2).padStart(5, '0') }.joinToString("")
         return bits.chunked(8).filter { it.length == 8 }.map { it.toInt(2).toByte() }.toByteArray()
