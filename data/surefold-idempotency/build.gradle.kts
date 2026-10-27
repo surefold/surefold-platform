@@ -7,10 +7,15 @@ dependencies {
     api(project(":surefold-jobs"))
 
     testImplementation(testFixtures(project(":surefold-actor-journal-jdbc")))
+    // The guide's example limits its clients too.
+    testImplementation(project(":surefold-ratelimit"))
     testImplementation("org.liquibase:liquibase-core:4.32.0")
 }
 
 tasks.test {
+    // HttpStoresGuideSuite holds docs/http-stores.md to this module's GuideExample.kt.
+    inputs.file(rootProject.layout.projectDirectory.file("docs/http-stores.md")).withPropertyName("guide")
+    systemProperty("surefold.idempotency.repoRoot", rootProject.projectDir.absolutePath)
     val mainRuntime = configurations.runtimeClasspath
     inputs.files(mainRuntime).withPropertyName("mainRuntimeClasspath")
     jvmArgumentProviders.add(
