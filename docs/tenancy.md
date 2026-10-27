@@ -81,6 +81,15 @@ create role booking_system login password '…' bypassrls;        -- the system 
 grant insert on surefold_tenancy_audit to booking_system;
 ```
 
+## Jobs
+
+With `surefold-jobs-tenancy` on the classpath, each job's handler runs as the tenant in its row's `tenant_id`,
+whoever enqueued it, so the handler's `TenantTransactions.transaction` sees that tenant's rows only. A job with no
+tenant runs with none, and its tenant transactions are refused.
+
+The jobs tables themselves hold every tenant's jobs and carry no policy: give the worker the system `DataSource`, so
+its claims cross tenants on the role that is meant to.
+
 ## Testing isolation
 
 `checkIsolated` from `surefold-tenancy-test` writes rows as two tenants and reads as each, and fails if either sees a
