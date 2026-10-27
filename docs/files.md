@@ -95,9 +95,10 @@ them, which matters on S3, where an upload left open keeps its parts and their c
 ## Testing
 
 `InMemoryFiles` is a `Files` in memory with the same answers. `Minio.files()`, from `surefold-files-test`, starts
-one MinIO for the test JVM and answers a store on a fresh bucket each call. MinIO no longer publishes images of its
-own, so it runs Bitnami's last build, `bitnamilegacy/minio:2025.7.23`; set the `surefold.files.test.image` system
-property to run another.
+one S3-compatible server for the test JVM and answers a store on a fresh bucket each call. MinIO no longer publishes
+public images, so it runs RustFS, `rustfs/rustfs:1.0.1`, a maintained server with MinIO's API; set the
+`surefold.files.test.image` system property to run another, such as Bitnami's last MinIO,
+`bitnamilegacy/minio:2025.7.23`.
 
 ## Metrics
 

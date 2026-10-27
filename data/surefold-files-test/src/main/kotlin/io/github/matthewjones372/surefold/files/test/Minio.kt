@@ -10,12 +10,13 @@ import java.net.URI
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * One MinIO for the test JVM, in a container started on first use and stopped when the JVM exits, and a fresh bucket
- * in it for each [files]. MinIO no longer publishes images of its own, so the default is Bitnami's last build of it;
- * set `surefold.files.test.image` to use another.
+ * One S3-compatible server for the test JVM, in a container started on first use and stopped when the JVM exits,
+ * and a fresh bucket in it for each [files]. MinIO no longer publishes public images, so the default is RustFS, a
+ * maintained server that speaks MinIO's API, health check included; set `surefold.files.test.image` to use another,
+ * such as `bitnamilegacy/minio:2025.7.23`. Each is given its credentials under both servers' names.
  */
 object Minio {
-    const val IMAGE = "bitnamilegacy/minio:2025.7.23"
+    const val IMAGE = "rustfs/rustfs:1.0.1"
     private const val USER = "surefold"
     private const val PASSWORD = "surefold-test-secret"
     private const val PORT = 9000
@@ -24,6 +25,8 @@ object Minio {
         GenericContainer(DockerImageName.parse(System.getProperty("surefold.files.test.image", IMAGE)))
             .withEnv("MINIO_ROOT_USER", USER)
             .withEnv("MINIO_ROOT_PASSWORD", PASSWORD)
+            .withEnv("RUSTFS_ACCESS_KEY", USER)
+            .withEnv("RUSTFS_SECRET_KEY", PASSWORD)
             .withExposedPorts(PORT)
             .waitingFor(Wait.forHttp("/minio/health/live").forPort(PORT))
             .apply { start() }
