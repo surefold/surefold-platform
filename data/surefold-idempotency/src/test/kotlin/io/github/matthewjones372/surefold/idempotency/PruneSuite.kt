@@ -2,6 +2,7 @@ package io.github.matthewjones372.surefold.idempotency
 
 import io.github.matthewjones372.surefold.TestClock
 import io.github.matthewjones372.surefold.actor.journal.jdbc.Postgres
+import io.github.matthewjones372.surefold.actor.journal.jdbc.migrate
 import io.github.matthewjones372.surefold.clock
 import io.github.matthewjones372.surefold.jobs.Cron
 import io.github.matthewjones372.surefold.jobs.JobHandlers
@@ -11,10 +12,6 @@ import io.github.matthewjones372.surefold.jobs.Jobs
 import io.github.matthewjones372.surefold.junit.Suite
 import io.github.matthewjones372.surefold.junit.shouldBe
 import io.github.matthewjones372.surefold.test.eventually
-import liquibase.Liquibase
-import liquibase.database.DatabaseFactory
-import liquibase.database.jvm.JdbcConnection
-import liquibase.resource.ClassLoaderResourceAccessor
 import java.time.Instant
 import java.time.ZoneOffset.UTC
 import javax.sql.DataSource
@@ -74,11 +71,7 @@ object PruneSuite : Suite() {
 
     private fun database(): DataSource = Postgres.empty().also { source ->
         for (changelog in listOf("surefold/idempotency/postgres.sql", "surefold/jobs/postgres.sql")) {
-            source.connection.use { connection ->
-                val database =
-                    DatabaseFactory.getInstance().findCorrectDatabaseImplementation(JdbcConnection(connection))
-                Liquibase(changelog, ClassLoaderResourceAccessor(), database).use { it.update() }
-            }
+            source.migrate(changelog)
         }
     }
 }

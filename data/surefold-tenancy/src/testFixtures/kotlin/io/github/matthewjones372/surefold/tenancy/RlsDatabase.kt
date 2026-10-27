@@ -1,10 +1,7 @@
 package io.github.matthewjones372.surefold.tenancy
 
 import io.github.matthewjones372.surefold.actor.journal.jdbc.Postgres
-import liquibase.Liquibase
-import liquibase.database.DatabaseFactory
-import liquibase.database.jvm.JdbcConnection
-import liquibase.resource.ClassLoaderResourceAccessor
+import io.github.matthewjones372.surefold.actor.journal.jdbc.migrate
 import org.postgresql.ds.PGSimpleDataSource
 import java.lang.reflect.Proxy
 import java.sql.Connection
@@ -34,11 +31,7 @@ class RlsDatabase(bookings: Boolean = true) {
 
     /** Applies [changelog], a classpath resource, as the owner. */
     fun apply(changelog: String) {
-        // Liquibase closes the connection it is handed.
-        owner.connection.use { connection ->
-            val database = DatabaseFactory.getInstance().findCorrectDatabaseImplementation(JdbcConnection(connection))
-            Liquibase(changelog, ClassLoaderResourceAccessor(), database).use { it.update() }
-        }
+        owner.migrate(changelog)
     }
 
     /** Lets the application and system roles read and write [table]. */

@@ -2,13 +2,10 @@ package io.github.matthewjones372.surefold.auth
 
 import io.github.matthewjones372.surefold.TestClock
 import io.github.matthewjones372.surefold.actor.journal.jdbc.Postgres
+import io.github.matthewjones372.surefold.actor.journal.jdbc.migrate
 import io.github.matthewjones372.surefold.clock
 import io.github.matthewjones372.surefold.junit.Suite
 import io.github.matthewjones372.surefold.junit.shouldBe
-import liquibase.Liquibase
-import liquibase.database.DatabaseFactory
-import liquibase.database.jvm.JdbcConnection
-import liquibase.resource.ClassLoaderResourceAccessor
 import java.time.Instant
 import javax.sql.DataSource
 import kotlin.time.Duration.Companion.hours
@@ -115,9 +112,6 @@ object SessionsSuite : Suite() {
     }
 
     fun database(): DataSource = Postgres.empty().also { source ->
-        source.connection.use { connection ->
-            val database = DatabaseFactory.getInstance().findCorrectDatabaseImplementation(JdbcConnection(connection))
-            Liquibase("surefold/auth/postgres.sql", ClassLoaderResourceAccessor(), database).use { it.update() }
-        }
+        source.migrate("surefold/auth/postgres.sql")
     }
 }

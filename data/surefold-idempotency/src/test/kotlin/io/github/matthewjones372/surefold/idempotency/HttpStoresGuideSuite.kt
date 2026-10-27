@@ -1,11 +1,14 @@
 package io.github.matthewjones372.surefold.idempotency
 
+import io.github.matthewjones372.surefold.TestClock
+import io.github.matthewjones372.surefold.clock
 import io.github.matthewjones372.surefold.junit.Suite
 import io.github.matthewjones372.surefold.junit.expect
 import io.github.matthewjones372.surefold.junit.shouldBe
 import io.github.matthewjones372.surefold.junit.shouldThrow
 import io.github.matthewjones372.surefold.ratelimit.InMemoryRateLimits
 import java.io.File
+import java.time.Instant
 import java.util.concurrent.atomic.AtomicInteger
 
 /** docs/http-stores.md's example is GuideExample.kt, and it charges once. */
@@ -42,9 +45,12 @@ object HttpStoresGuideSuite : Suite() {
         }
 
         test("a client over its rate is told to come back") {
-            val payments = Payments(PostgresIdempotency(IdempotencySuite.database()), InMemoryRateLimits())
-            repeat(20) { payments.pay("acme", "c1", "k$it", "1 GBP") { "r" } }
-            payments.pay("acme", "c1", "k21", "1 GBP") { "r" }.status shouldBe 429
+            // On a clock that stands still, so no token comes back while the twenty are taken.
+            clock.locally(TestClock(Instant.parse("2026-10-27T12:00:00Z"))) {
+                val payments = Payments(PostgresIdempotency(IdempotencySuite.database()), InMemoryRateLimits())
+                repeat(20) { payments.pay("acme", "c1", "k$it", "1 GBP") { "r" } }
+                payments.pay("acme", "c1", "k21", "1 GBP") { "r" }.status shouldBe 429
+            }
         }
     }
 
