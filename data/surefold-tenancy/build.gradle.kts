@@ -3,6 +3,10 @@
 
 dependencies {
     api(project(":surefold"))
+
+    // A real Postgres, in a container, with roles that row-level security binds and one it does not.
+    testImplementation(testFixtures(project(":surefold-actor-journal-jdbc")))
+    testImplementation("org.liquibase:liquibase-core:4.32.0")
 }
 
 tasks.test {
