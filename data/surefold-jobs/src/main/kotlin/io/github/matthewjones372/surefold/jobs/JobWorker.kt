@@ -55,10 +55,11 @@ class JobWorker(
     private val settings: JobSettings = JobSettings(),
     val name: String = "${ProcessHandle.current().pid()}-${UUID.randomUUID()}",
     private val cron: List<CronEntry<*>> = emptyList(),
+    watchers: List<JobRunWatcher> = JobRunWatchers.registered,
 ) : AutoCloseable {
 
     private val queue = Queue(source, name)
-    private val run = JobRun(queue, handlers)
+    private val run = JobRun(queue, handlers, watchers = watchers)
     private val running = handlers.byName.keys.associateWith { AtomicInteger() }
     private val inFlight = ConcurrentHashMap.newKeySet<CompletableFuture<*>>()
 
