@@ -11,7 +11,7 @@ object NoOtherDependenciesTest : Suite() {
     private val allowed = listOf("kotlin-stdlib", "annotations-", "surefold")
 
     init {
-        test("the main runtime classpath is surefold's own, and nothing else") {
+        test("the main runtime classpath is surefold and surefold-jobs, and nothing else") {
             val raw = System.getProperty("surefold.idempotency.runtimeClasspath")
             expect(raw != null) { "the build must pass -Dsurefold.idempotency.runtimeClasspath; see its build file" }
             raw!!.split(File.pathSeparator)
