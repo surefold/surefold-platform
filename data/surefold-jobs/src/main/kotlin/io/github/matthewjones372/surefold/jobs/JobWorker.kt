@@ -1,6 +1,7 @@
 package io.github.matthewjones372.surefold.jobs
 
 import io.github.matthewjones372.surefold.clock
+import io.github.matthewjones372.surefold.gauge
 import io.github.matthewjones372.surefold.logInfo
 import io.github.matthewjones372.surefold.logWarn
 import io.github.matthewjones372.surefold.surefoldFuture
@@ -13,12 +14,15 @@ import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.locks.ReentrantLock
 import javax.sql.DataSource
+import kotlin.concurrent.withLock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.ZERO
 import kotlin.time.Duration.Companion.days
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.DurationUnit
 import kotlin.time.toJavaDuration
 
 /**
@@ -52,8 +56,10 @@ class JobWorker(
     private val running = handlers.byName.keys.associateWith { AtomicInteger() }
     private val inFlight = ConcurrentHashMap.newKeySet<CompletableFuture<*>>()
 
-    @Volatile
+    // The loop sleeps between polls; close interrupts it only while it sleeps, never in the middle of a query.
+    private val lock = ReentrantLock()
     private var stopping = false
+    private var sleeping: Thread? = null
 
     @Volatile
     private var loop: CompletableFuture<Unit>? = null
@@ -67,18 +73,46 @@ class JobWorker(
 
     private fun polling() {
         var housekeepingDue = clock.get().now()
-        while (!stopping) {
+        while (true) {
             try {
                 if (clock.get().now() >= housekeepingDue) {
                     queue.sweep()
                     queue.prune(settings.retention)
+                    measureBacklog()
                     housekeepingDue = clock.get().now() + settings.housekeeping.toJavaDuration()
                 }
                 claimAndRun()
             } catch (failed: SQLException) {
                 logWarn("surefold-jobs: worker $name could not reach the jobs table, and will try again: $failed")
             }
-            if (!stopping) clock.get().sleep(settings.poll)
+            if (!pause()) return
+        }
+    }
+
+    /** Sleeps until the next poll, and answers false once the worker is closing. */
+    private fun pause(): Boolean {
+        lock.withLock {
+            if (stopping) return false
+            sleeping = Thread.currentThread()
+        }
+        try {
+            clock.get().sleep(settings.poll)
+        } catch (_: InterruptedException) {
+            // Woken by close.
+        } finally {
+            lock.withLock { sleeping = null }
+            Thread.interrupted()
+        }
+        return lock.withLock { !stopping }
+    }
+
+    /** Sets each handled kind's depth and lag, zero for one with nothing due, so a drained queue reads as drained. */
+    internal fun measureBacklog() {
+        val backlog = queue.backlog()
+        (handlers.byName.keys + backlog.keys).forEach { kind ->
+            val (depth, lag) = backlog[kind] ?: Backlog(0, ZERO)
+            gauge(DEPTH, "kind" to kind).set(depth.toDouble())
+            gauge(LAG, "kind" to kind).set(lag.toDouble(DurationUnit.SECONDS))
         }
     }
 
@@ -113,8 +147,11 @@ class JobWorker(
 
     /** Stops claiming, waits up to [JobSettings.drain] for runs in flight, and interrupts what is left. */
     override fun close() {
-        if (stopping) return
-        stopping = true
+        lock.withLock {
+            if (stopping) return
+            stopping = true
+            sleeping?.interrupt()
+        }
         loop?.join()
         val until = System.nanoTime() + settings.drain.inWholeNanoseconds
         inFlight.toList().forEach { future ->
@@ -133,5 +170,11 @@ class JobWorker(
 
     private companion object {
         const val UNHANDLED_BATCH = 10
+
+        /** Jobs due and waiting, per kind. */
+        const val DEPTH = "surefold.jobs.depth"
+
+        /** How long the oldest job due has waited past its run time, in seconds, per kind. */
+        const val LAG = "surefold.jobs.lag.seconds"
     }
 }

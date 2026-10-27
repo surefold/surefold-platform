@@ -8,6 +8,7 @@ import java.util.UUID
 import javax.sql.DataSource
 import kotlin.time.Duration
 import kotlin.time.toJavaDuration
+import kotlin.time.toKotlinDuration
 
 /** A job one worker holds the lease on, as claimed. [attempts] counts this run, and fences what the run writes. */
 internal data class Claimed(
@@ -23,6 +24,9 @@ internal data class Claimed(
     val attempts: Int,
     val maxAttempts: Int,
 )
+
+/** How many jobs of a kind are due and waiting, and how long the oldest has waited past its run time. */
+internal data class Backlog(val depth: Long, val lag: Duration)
 
 /** Which kinds a claim takes. */
 internal sealed interface Kinds {
@@ -103,6 +107,24 @@ internal class Queue(private val source: DataSource, private val worker: String)
         }
     }
 
+    /** For each kind with a job due and waiting: how many, and how long the longest has waited past its run time. */
+    fun backlog(): Map<String, Backlog> {
+        val now = clock.get().now()
+        return source.connection.use { connection ->
+            connection.prepareStatement(BACKLOG).use { statement ->
+                statement.bind(listOf(now))
+                statement.executeQuery().use { rows ->
+                    generateSequence {
+                        if (!rows.next()) return@generateSequence null
+                        val oldest = rows.getObject(3, OffsetDateTime::class.java).toInstant()
+                        rows.getString(1) to
+                            Backlog(rows.getLong(2), java.time.Duration.between(oldest, now).toKotlinDuration())
+                    }.toMap()
+                }
+            }
+        }
+    }
+
     /** Deletes history that finished more than [retention] ago, and answers how many rows. */
     fun prune(retention: Duration): Int = source.connection.use { connection ->
         connection.prepareStatement("delete from surefold_jobs_history where finished_at < ?").use { statement ->
@@ -137,6 +159,10 @@ internal class Queue(private val source: DataSource, private val worker: String)
             )
             returning id, tenant_id, kind, payload::text, payload_version, carried::text, run_at, expires_at, priority,
                 attempts, max_attempts
+        """
+
+        const val BACKLOG = """
+            select kind, count(*), min(run_at) from surefold_jobs where status = 'pending' and run_at <= ? group by kind
         """
 
         const val RETRY = """
