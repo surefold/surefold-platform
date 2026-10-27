@@ -2,14 +2,11 @@ package io.github.matthewjones372.surefold.idempotency
 
 import io.github.matthewjones372.surefold.TestClock
 import io.github.matthewjones372.surefold.actor.journal.jdbc.Postgres
+import io.github.matthewjones372.surefold.actor.journal.jdbc.migrate
 import io.github.matthewjones372.surefold.clock
 import io.github.matthewjones372.surefold.junit.Suite
 import io.github.matthewjones372.surefold.junit.shouldBe
 import io.github.matthewjones372.surefold.junit.shouldThrow
-import liquibase.Liquibase
-import liquibase.database.DatabaseFactory
-import liquibase.database.jvm.JdbcConnection
-import liquibase.resource.ClassLoaderResourceAccessor
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -107,9 +104,6 @@ object IdempotencySuite : Suite() {
     }
 
     fun database(): DataSource = Postgres.empty().also { source ->
-        source.connection.use { connection ->
-            val database = DatabaseFactory.getInstance().findCorrectDatabaseImplementation(JdbcConnection(connection))
-            Liquibase("surefold/idempotency/postgres.sql", ClassLoaderResourceAccessor(), database).use { it.update() }
-        }
+        source.migrate("surefold/idempotency/postgres.sql")
     }
 }

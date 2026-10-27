@@ -1,6 +1,7 @@
 package io.github.matthewjones372.surefold.jobs.tenancy
 
 import io.github.matthewjones372.surefold.actor.journal.jdbc.Postgres
+import io.github.matthewjones372.surefold.actor.journal.jdbc.migrate
 import io.github.matthewjones372.surefold.jobs.JobCodec
 import io.github.matthewjones372.surefold.jobs.JobHandlers
 import io.github.matthewjones372.surefold.jobs.JobKind
@@ -14,10 +15,6 @@ import io.github.matthewjones372.surefold.tenancy.TenantId
 import io.github.matthewjones372.surefold.tenancy.currentTenant
 import io.github.matthewjones372.surefold.tenancy.withTenant
 import io.github.matthewjones372.surefold.test.eventually
-import liquibase.Liquibase
-import liquibase.database.DatabaseFactory
-import liquibase.database.jvm.JdbcConnection
-import liquibase.resource.ClassLoaderResourceAccessor
 import java.util.ServiceLoader
 import java.util.concurrent.ConcurrentHashMap
 import javax.sql.DataSource
@@ -63,9 +60,6 @@ object TenantOfJobSuite : Suite() {
     }
 
     private fun database(): DataSource = Postgres.empty().also { source ->
-        source.connection.use { connection ->
-            val database = DatabaseFactory.getInstance().findCorrectDatabaseImplementation(JdbcConnection(connection))
-            Liquibase("surefold/jobs/postgres.sql", ClassLoaderResourceAccessor(), database).use { it.update() }
-        }
+        source.migrate("surefold/jobs/postgres.sql")
     }
 }

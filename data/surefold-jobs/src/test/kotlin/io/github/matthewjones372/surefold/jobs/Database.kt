@@ -1,19 +1,13 @@
 package io.github.matthewjones372.surefold.jobs
 
 import io.github.matthewjones372.surefold.actor.journal.jdbc.Postgres
-import liquibase.Liquibase
-import liquibase.database.DatabaseFactory
-import liquibase.database.jvm.JdbcConnection
-import liquibase.resource.ClassLoaderResourceAccessor
+import io.github.matthewjones372.surefold.actor.journal.jdbc.migrate
 import java.sql.Connection
 import javax.sql.DataSource
 
 /** A fresh database with the jobs changelog applied, as a service's own changelog would include it. */
 fun jobsDatabase(): DataSource = Postgres.empty().also { source ->
-    source.connection.use { connection ->
-        val database = DatabaseFactory.getInstance().findCorrectDatabaseImplementation(JdbcConnection(connection))
-        Liquibase("surefold/jobs/postgres.sql", ClassLoaderResourceAccessor(), database).use { it.update() }
-    }
+    source.migrate("surefold/jobs/postgres.sql")
 }
 
 /** Runs [block] in one transaction, committed when it returns. */
