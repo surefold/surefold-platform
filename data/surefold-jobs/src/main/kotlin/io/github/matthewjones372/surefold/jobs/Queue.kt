@@ -27,6 +27,7 @@ internal data class Claimed(
     val attempts: Int,
     val maxAttempts: Int,
     val recurrence: Cron? = null,
+    val progress: Progress = Progress(),
 )
 
 /** How many jobs of a kind are due and waiting, and how long the oldest has waited past its run time. */
@@ -190,6 +191,20 @@ internal class Queue(private val source: DataSource, private val worker: String)
     }
 
     /**
+     * Returns [job] to pending at [at] with [payload] in place of its own and [progress] added to its counters, giving
+     * its attempt back. Answers false when this worker no longer holds it.
+     */
+    fun proceed(job: Claimed, payload: String, at: Instant, progress: Progress): Boolean {
+        val now = clock.get().now()
+        return source.connection.use { connection ->
+            connection.prepareStatement(PROCEED).use { statement ->
+                statement.bind(listOf(payload, at, progress.done, progress.total, now, job.id, job.attempts, worker))
+                statement.executeUpdate() == 1
+            }
+        }
+    }
+
+    /**
      * Returns each running job whose lease has passed to pending, as a worker that died mid-run left it, and fails into
      * history those that have had every attempt. Answers how many it returned.
      */
@@ -243,6 +258,7 @@ internal class Queue(private val source: DataSource, private val worker: String)
         attempts = getInt("attempts"),
         maxAttempts = getInt("max_attempts"),
         recurrence = getString("recurrence")?.let(Cron::read),
+        progress = Progress(getLong("progress_done"), getObject("progress_total") as Long?),
     )
 
     private fun ResultSet.instant(column: String): Instant? = getObject(column, OffsetDateTime::class.java)?.toInstant()
@@ -256,7 +272,7 @@ internal class Queue(private val source: DataSource, private val worker: String)
                 order by priority desc, run_at limit ? for update skip locked
             )
             returning id, tenant_id, kind, dedupe_key, payload::text, payload_version, carried::text, run_at,
-                expires_at, priority, attempts, max_attempts, recurrence
+                expires_at, priority, attempts, max_attempts, recurrence, progress_done, progress_total
         """
 
         /** How many due jobs a fair claim ranks, per job it may take: a backlog of millions costs a bounded scan. */
@@ -281,7 +297,14 @@ internal class Queue(private val source: DataSource, private val worker: String)
                 ) and status = 'pending' for update skip locked
             )
             returning id, tenant_id, kind, dedupe_key, payload::text, payload_version, carried::text, run_at,
-                expires_at, priority, attempts, max_attempts, recurrence
+                expires_at, priority, attempts, max_attempts, recurrence, progress_done, progress_total
+        """
+
+        const val PROCEED = """
+            update surefold_jobs set status = 'pending', payload = ?::jsonb, run_at = ?, attempts = attempts - 1,
+                progress_done = progress_done + ?, progress_total = coalesce(?::bigint, progress_total),
+                last_error = null, locked_until = null, locked_by = null, updated_at = ?
+            where id = ? and attempts = ? and locked_by = ? and status = 'running'
         """
 
         const val NEXT = """

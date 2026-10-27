@@ -13,7 +13,7 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.toJavaDuration
 
-/** Runs, tagged by kind and by result: `done`, `retry`, `skipped` or `failed`. */
+/** Runs, tagged by kind and by result: `done`, `retry`, `continue`, `skipped` or `failed`. */
 internal const val RUNS = "surefold.jobs.runs"
 
 /** How long each handler ran, in seconds, tagged by kind. */
@@ -79,6 +79,14 @@ internal class JobRun(
                 queue.retry(claimed, clock.get().now() + result.after.toJavaDuration(), result.reason, count = false)
                 counted(claimed, "retry")
             }
+
+            is JobResult.Continue<*> -> {
+                // A handler of P answers a Continue of P: the handler's type says so, and erasure cannot.
+                @Suppress("UNCHECKED_CAST")
+                val next = handled.kind.codec.encode(result.payload as P)
+                queue.proceed(claimed, next, clock.get().now() + result.after.toJavaDuration(), result.progress)
+                counted(claimed, "continue")
+            }
         }
     }
 
@@ -89,6 +97,7 @@ internal class JobRun(
         tenant = claimed.tenant,
         runAt = claimed.runAt,
         attempt = claimed.attempts,
+        progress = claimed.progress,
     )
 
     private fun retried(claimed: Claimed, error: String) {

@@ -138,11 +138,28 @@ When an occurrence finishes, done, skipped or failed, the next is enqueued with 
 the transaction that moves this one to history, at the rule's next firing after now. A retry is not a finish, and
 does not move the series on. Cancelling the key ends it.
 
+## Work in chunks
+
+A job too long for one run keeps a cursor in its payload. The handler does a chunk and answers `Continue` with the
+payload to resume from and what it did; the job goes back to pending, uses no attempt, and runs again after `after`.
+A crash between chunks resumes from the last cursor written.
+
+```kotlin
+Backfill.handledBy { job ->
+    val batch = rows.after(job.payload.lastId, 500)
+    if (batch.isEmpty()) JobResult.Done
+    else JobResult.Continue(Cursor(batch.last().id), progress = Progress(done = batch.size.toLong()))
+}
+```
+
+`job.progress` is what earlier runs added up, and history keeps it once the job finishes.
+
 ## Retries and failures
 
 | What happened | What the job does |
 |---|---|
 | `Retry(after, reason)` | runs again after `after`, without using up an attempt |
+| `Continue(payload, after, progress)` | stores the payload, adds the progress, and runs again after `after`, without using up an attempt |
 | the handler threw, or missed its deadline | runs again after the backoff for that attempt, doubling from a second with jitter; fails on its last attempt (`maxAttempts`, five by default) |
 | `Skip` | moves to history as `skipped` |
 | `Fail` | moves to history as `failed`, with a warning logged |
@@ -168,7 +185,7 @@ does not move the series on. Cancelling the key ends it.
 
 | Metric | Kind | Tags |
 |---|---|---|
-| `surefold.jobs.runs` | counter | `kind`, `result`: `done`, `retry`, `skipped`, `failed` |
+| `surefold.jobs.runs` | counter | `kind`, `result`: `done`, `retry`, `continue`, `skipped`, `failed` |
 | `surefold.jobs.duration.seconds` | histogram | `kind` |
 | `surefold.jobs.depth` | gauge, jobs due and waiting | `kind` |
 | `surefold.jobs.lag.seconds` | gauge, how long the oldest due job has waited | `kind` |
