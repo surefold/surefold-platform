@@ -18,8 +18,11 @@ sealed interface FileError {
     data class InvalidKey(val key: String, val why: String) : FileError
 }
 
-/** A stored file's metadata. [etag] is the store's, opaque, and changes whenever the content does. */
-data class FileMeta(val key: FileKey, val size: Long, val contentType: String, val etag: String, val modified: Instant)
+/**
+ * A stored file's metadata. [etag] is the store's, opaque, and changes whenever the content does. [contentType] is
+ * null in a listing, which S3 does not say it in.
+ */
+data class FileMeta(val key: FileKey, val size: Long, val contentType: String?, val etag: String, val modified: Instant)
 
 /** A file being read: close it, or the connection under [stream] stays held. */
 class FileContent(val meta: FileMeta, val stream: InputStream) : AutoCloseable {
