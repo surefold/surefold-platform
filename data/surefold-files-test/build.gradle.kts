@@ -8,6 +8,9 @@ dependencies {
 }
 
 tasks.test {
+    // FilesGuideSuite holds docs/files.md to this module's GuideExample.kt.
+    inputs.file(rootProject.layout.projectDirectory.file("docs/files.md")).withPropertyName("guide")
+    systemProperty("surefold.files.test.repoRoot", rootProject.projectDir.absolutePath)
     val mainRuntime = configurations.runtimeClasspath
     inputs.files(mainRuntime).withPropertyName("mainRuntimeClasspath")
     jvmArgumentProviders.add(
