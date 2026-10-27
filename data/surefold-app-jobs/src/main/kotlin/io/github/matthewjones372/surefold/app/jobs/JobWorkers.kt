@@ -1,8 +1,8 @@
 package io.github.matthewjones372.surefold.app.jobs
 
+import io.github.matthewjones372.surefold.app.Migrated
 import io.github.matthewjones372.surefold.app.Module
 import io.github.matthewjones372.surefold.app.closingOf
-import io.github.matthewjones372.surefold.app.liquibase.Migrated
 import io.github.matthewjones372.surefold.jobs.CronEntry
 import io.github.matthewjones372.surefold.jobs.JobHandlers
 import io.github.matthewjones372.surefold.jobs.JobSettings
@@ -11,7 +11,7 @@ import javax.sql.DataSource
 
 /**
  * A [JobWorker] running [handlers], and enqueueing the firings of [cron], as a node. It takes a [Migrated], so it
- * starts only once the changelog that holds the jobs tables has run, and its [JobSettings] from the graph. Released,
+ * starts only once the migrations that hold the jobs tables have run, and its [JobSettings] from the graph. Released,
  * it stops claiming and drains.
  */
 fun jobWorker(handlers: JobHandlers, cron: List<CronEntry<*>> = emptyList()): Module =
