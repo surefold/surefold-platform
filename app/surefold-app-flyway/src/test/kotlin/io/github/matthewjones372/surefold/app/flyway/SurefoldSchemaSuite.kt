@@ -44,7 +44,7 @@ private val CATALOG = listOf(
 
 private val HISTORY = Regex("""\b(databasechangelog\w*|flyway_\w+)\b""")
 
-private fun catalog(source: DataSource): List<String> =
+internal fun catalog(source: DataSource): List<String> =
     source.connection.use { connection ->
         CATALOG.flatMap { sql ->
             connection.createStatement().use { statement ->

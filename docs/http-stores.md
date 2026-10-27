@@ -81,11 +81,12 @@ jobWorker(
 )
 ```
 
-The table ships as `surefold/idempotency/postgres.sql`, for the service's changelog to include.
+The table ships as `surefold/idempotency/postgres.sql`, for the service's changelog to include, or for Flyway as
+`flyway(SurefoldSchema.IDEMPOTENCY, …)` ([Flyway](flyway.md)).
 
 ## Rate limits
 
 `take(key, TokenBucket(rate, per, burst), cost)` answers `Allowed(remaining)` or `Denied(retryAfter)`, the time until
 the tokens asked for are there, which is what a `Retry-After` header says. A bucket is full the first time a key is
 seen. `PostgresRateLimits` refills and draws in one statement on the key's row, so every instance shares one bucket;
-`InMemoryRateLimits` is for a single instance or a test. The table ships as `surefold/ratelimit/postgres.sql`.
+`InMemoryRateLimits` is for a single instance or a test. The table ships as `surefold/ratelimit/postgres.sql`, or for Flyway as `flyway(SurefoldSchema.RATELIMIT, …)`.

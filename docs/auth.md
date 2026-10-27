@@ -65,6 +65,8 @@ start.
 <include file="surefold/auth/postgres.sql"/>
 ```
 
+On Flyway, `flyway(SurefoldSchema.AUTH, …)` runs the same SQL ([Flyway](flyway.md)).
+
 | Table | Holds |
 |-------|-------|
 | `surefold_sessions` | one row per session, by the SHA-256 of its token |

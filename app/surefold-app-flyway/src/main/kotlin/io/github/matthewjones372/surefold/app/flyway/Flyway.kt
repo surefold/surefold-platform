@@ -27,14 +27,17 @@ data class FlywaySettings(
  * Runs [modules]' scripts, in [SurefoldSchema] order whatever the argument order, then those at [service], a Flyway
  * location such as `classpath:db/migration`, against the graph's [DataSource], once, before anything that takes a
  * [Migrated] is built. Flyway takes its connections from the source and gives them back before the node answers. A
- * script that fails, or an applied one since edited, refuses the start.
+ * script that fails, or an applied one since edited, refuses the start. A database Liquibase has migrated until now is
+ * refused unless [fromLiquibase] names the last changeset it applied, `author:id`; then it is handed over once.
  */
 fun flyway(
     vararg modules: SurefoldSchema,
     service: String? = null,
     settings: FlywaySettings = FlywaySettings(),
-): Module =
-    single { source: DataSource -> migrated { migrate(source, *modules, service = service, settings = settings) } }
+    fromLiquibase: String? = null,
+): Module = single { source: DataSource ->
+    migrated { migrate(source, *modules, service = service, settings = settings, fromLiquibase = fromLiquibase) }
+}
 
 /**
  * [flyway] on a source [connect] opens from [S], a node in the graph, such as a pool logged in as the schema's owner.
@@ -44,9 +47,14 @@ inline fun <reified S : Any> flyway(
     vararg modules: SurefoldSchema,
     service: String? = null,
     settings: FlywaySettings = FlywaySettings(),
+    fromLiquibase: String? = null,
     noinline connect: (S) -> DataSource,
 ): Module = single { key: S ->
-    migrated { connected(connect(key)) { source -> migrate(source, *modules, service = service, settings = settings) } }
+    migrated {
+        connected(connect(key)) { source ->
+            migrate(source, *modules, service = service, settings = settings, fromLiquibase = fromLiquibase)
+        }
+    }
 }
 
 /**
@@ -58,12 +66,14 @@ fun migrate(
     vararg modules: SurefoldSchema,
     service: String? = null,
     settings: FlywaySettings = FlywaySettings(),
+    fromLiquibase: String? = null,
 ): Int {
-    if (source.hasTable("databasechangelog")) {
-        throw FlywayException(
-            "this database has Liquibase's databasechangelog: hand it over to Flyway with fromLiquibase, as " +
+    if (source.hasTable(LIQUIBASE)) {
+        fromLiquibase ?: throw FlywayException(
+            "this database has Liquibase's $LIQUIBASE: hand it over to Flyway with fromLiquibase, as " +
                 "docs/flyway.md describes, rather than running Flyway's scripts over Liquibase's tables",
         )
+        handOver(source, modules.toSortedSet(), service, settings, fromLiquibase)
     }
     val runs =
         modules.toSortedSet().map { it.location to it.table } + listOfNotNull(service?.let { it to SERVICE_TABLE })

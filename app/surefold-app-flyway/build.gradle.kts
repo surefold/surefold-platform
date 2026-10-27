@@ -19,6 +19,9 @@ dependencies {
 }
 
 tasks.test {
+    // FlywayGuideSuite holds docs/flyway.md to this module's GuideExample.kt.
+    inputs.file(rootProject.layout.projectDirectory.file("docs/flyway.md")).withPropertyName("guide")
+    systemProperty("surefold.app.flyway.repoRoot", rootProject.projectDir.absolutePath)
     val mainRuntime = configurations.runtimeClasspath
     inputs.files(mainRuntime).withPropertyName("mainRuntimeClasspath")
     jvmArgumentProviders.add(

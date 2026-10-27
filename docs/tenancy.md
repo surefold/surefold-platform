@@ -55,7 +55,8 @@ create policy tenant_isolation on bookings
   connection that skipped `TenantTransactions` sees nothing rather than everything.
 - The application's role must be neither a superuser nor `BYPASSRLS`. Its connections are the ones the policy binds.
 
-Include surefold's own changelog for the audit table too: `<include file="surefold/tenancy/postgres.sql"/>`.
+Include surefold's own changelog for the audit table too: `<include file="surefold/tenancy/postgres.sql"/>`. On Flyway,
+`flyway(SurefoldSchema.TENANCY, …)` runs the same SQL ([Flyway](flyway.md)).
 
 ## Transactions
 

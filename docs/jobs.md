@@ -28,6 +28,8 @@ databaseChangeLog:
       file: surefold/jobs/postgres.sql
 ```
 
+On Flyway, `flyway(SurefoldSchema.JOBS, service = …)` runs the same SQL instead ([Flyway](flyway.md)).
+
 `surefold_jobs` holds every job not yet finished. A finished job moves to `surefold_jobs_history` in the transaction
 that finishes it, and is deleted from there once it is older than `JobSettings.retention`.
 
