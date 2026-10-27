@@ -188,7 +188,8 @@ class JobWorker(
         listener?.close()
         loop?.join()
         val until = System.nanoTime() + settings.drain.inWholeNanoseconds
-        inFlight.toList().forEach { future ->
+        // Through the iterator: `toList` reads the size first, and a run that ends in between makes it throw.
+        inFlight.iterator().asSequence().toList().forEach { future ->
             try {
                 future.get(maxOf(0, until - System.nanoTime()), TimeUnit.NANOSECONDS)
             } catch (_: TimeoutException) {

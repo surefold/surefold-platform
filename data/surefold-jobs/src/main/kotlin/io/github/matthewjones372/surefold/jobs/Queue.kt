@@ -17,6 +17,7 @@ internal data class Claimed(
     val id: UUID,
     val tenant: String?,
     val kind: String,
+    val dedupeKey: String,
     val payload: String,
     val payloadVersion: Int,
     val carried: String?,
@@ -25,6 +26,7 @@ internal data class Claimed(
     val priority: Int,
     val attempts: Int,
     val maxAttempts: Int,
+    val recurrence: Cron? = null,
 )
 
 /** How many jobs of a kind are due and waiting, and how long the oldest has waited past its run time. */
@@ -140,10 +142,36 @@ internal class Queue(private val source: DataSource, private val worker: String)
     fun finish(job: Claimed, how: Finished, error: String? = null): Boolean {
         val now = clock.get().now()
         return source.connection.use { connection ->
-            connection.prepareStatement(finishing(how)).use { statement ->
-                statement.bind(listOf(job.id, job.attempts, worker, error, now, now))
-                statement.executeUpdate() == 1
+            val rule = job.recurrence
+            if (rule != null) connection.autoCommit = false
+            try {
+                val finished = connection.prepareStatement(finishing(how)).use { statement ->
+                    statement.bind(listOf(job.id, job.attempts, worker, error, now, now))
+                    statement.executeUpdate() == 1
+                }
+                if (rule != null) {
+                    if (finished) connection.enqueueNext(job, rule)
+                    connection.commit()
+                }
+                finished
+            } finally {
+                connection.rollbackIfOpen()
             }
+        }
+    }
+
+    /** The occurrence after [job]'s, with its key, payload and tenant, never earlier than now: no catching up. */
+    private fun Connection.enqueueNext(job: Claimed, rule: Cron) {
+        val now = clock.get().now()
+        val at = rule.next(maxOf(job.runAt, now)) ?: return
+        prepareStatement(NEXT).use { statement ->
+            statement.bind(
+                listOf(
+                    uuidV7(now), job.tenant, job.kind, job.dedupeKey, job.payload, job.payloadVersion, job.carried,
+                    at, job.priority, job.maxAttempts, rule.stored(), now, now,
+                ),
+            )
+            statement.executeUpdate()
         }
     }
 
@@ -205,6 +233,7 @@ internal class Queue(private val source: DataSource, private val worker: String)
         id = getObject("id", UUID::class.java),
         tenant = getString("tenant_id"),
         kind = getString("kind"),
+        dedupeKey = getString("dedupe_key"),
         payload = getString("payload"),
         payloadVersion = getInt("payload_version"),
         carried = getString("carried"),
@@ -213,6 +242,7 @@ internal class Queue(private val source: DataSource, private val worker: String)
         priority = getInt("priority"),
         attempts = getInt("attempts"),
         maxAttempts = getInt("max_attempts"),
+        recurrence = getString("recurrence")?.let(Cron::read),
     )
 
     private fun ResultSet.instant(column: String): Instant? = getObject(column, OffsetDateTime::class.java)?.toInstant()
@@ -225,8 +255,8 @@ internal class Queue(private val source: DataSource, private val worker: String)
                 select id from surefold_jobs where status = 'pending' and run_at <= ? $filter
                 order by priority desc, run_at limit ? for update skip locked
             )
-            returning id, tenant_id, kind, payload::text, payload_version, carried::text, run_at, expires_at, priority,
-                attempts, max_attempts
+            returning id, tenant_id, kind, dedupe_key, payload::text, payload_version, carried::text, run_at,
+                expires_at, priority, attempts, max_attempts, recurrence
         """
 
         /** How many due jobs a fair claim ranks, per job it may take: a backlog of millions costs a bounded scan. */
@@ -250,8 +280,15 @@ internal class Queue(private val source: DataSource, private val worker: String)
                     where place <= ? order by priority desc, run_at limit ?
                 ) and status = 'pending' for update skip locked
             )
-            returning id, tenant_id, kind, payload::text, payload_version, carried::text, run_at, expires_at, priority,
-                attempts, max_attempts
+            returning id, tenant_id, kind, dedupe_key, payload::text, payload_version, carried::text, run_at,
+                expires_at, priority, attempts, max_attempts, recurrence
+        """
+
+        const val NEXT = """
+            insert into surefold_jobs (id, tenant_id, kind, dedupe_key, payload, payload_version, carried, run_at,
+                priority, status, max_attempts, recurrence, created_at, updated_at)
+            values (?, ?::text, ?, ?, ?::jsonb, ?, ?::jsonb, ?, ?, 'pending', ?, ?, ?, ?)
+            on conflict on constraint surefold_jobs_key do nothing
         """
 
         const val BUCKET_MADE = """

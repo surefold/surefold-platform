@@ -51,6 +51,35 @@ object Jobs {
         return enqueued
     }
 
+    /**
+     * Enqueues [payload] as the first occurrence of a series on [rule]: when an occurrence finishes, done, skipped or
+     * failed, the next is enqueued with the same key, payload and tenant, in the transaction that finishes it. Cancel
+     * by the key ends the series. Answers false, as [enqueue] does, when the key is already waiting or running.
+     */
+    fun <P> enqueueRecurring(
+        connection: Connection,
+        kind: JobKind<P>,
+        payload: P,
+        dedupeKey: String,
+        rule: Cron,
+        priority: Int = 0,
+        maxAttempts: Int = 5,
+        tenant: String? = null,
+    ): Boolean {
+        require(maxAttempts >= 1) { "A job needs at least one attempt, not $maxAttempts." }
+        val now = clock.get().now()
+        val first = requireNotNull(rule.next(now)) { "The rule $rule never fires." }
+        return connection.prepareStatement(ENQUEUE_RECURRING).use { statement ->
+            statement.bind(
+                listOf(
+                    uuidV7(now), tenant, kind.name, dedupeKey, kind.codec.encode(payload), kind.codec.version,
+                    Carried.write(Carriers.capture()), first, priority, maxAttempts, rule.stored(), now, now,
+                ),
+            )
+            statement.executeUpdate() == 1
+        }
+    }
+
     /** Cancels the waiting job with this key into history. Answers false when none waits: a running one runs on. */
     fun cancel(connection: Connection, kind: JobKind<*>, dedupeKey: String, tenant: String? = null): Boolean {
         val now = clock.get().now()
@@ -79,6 +108,13 @@ object Jobs {
         insert into surefold_jobs (id, tenant_id, kind, dedupe_key, payload, payload_version, carried, run_at,
             expires_at, priority, status, max_attempts, created_at, updated_at)
         values (?, ?::text, ?, ?, ?::jsonb, ?, ?::jsonb, ?, ?::timestamptz, ?, 'pending', ?, ?, ?)
+        on conflict on constraint surefold_jobs_key do nothing
+    """
+
+    private const val ENQUEUE_RECURRING = """
+        insert into surefold_jobs (id, tenant_id, kind, dedupe_key, payload, payload_version, carried, run_at,
+            priority, status, max_attempts, recurrence, created_at, updated_at)
+        values (?, ?::text, ?, ?, ?::jsonb, ?, ?::jsonb, ?, ?, 'pending', ?, ?, ?, ?)
         on conflict on constraint surefold_jobs_key do nothing
     """
 
