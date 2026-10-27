@@ -56,3 +56,12 @@ create index surefold_jobs_history_finished on surefold_jobs_history (finished_a
 --changeset surefold:jobs-leases
 -- What a sweep reads: the running jobs, by when their leases end.
 create index surefold_jobs_leases on surefold_jobs (locked_until) where status = 'running';
+
+--changeset surefold:jobs-buckets
+-- One token bucket per kind with a rate (spec 0217), shared by every worker: a claim locks its row, refills it from
+-- the clock, and takes what it claimed, in one transaction.
+create table surefold_jobs_buckets (
+    kind        text             primary key,
+    tokens      double precision not null,
+    refilled_at timestamptz      not null
+);

@@ -14,12 +14,27 @@ interface JobCodec<P> {
     fun decode(version: Int, json: String): P
 }
 
-/** A kind of job: its name in the table, how its payload is stored, and the bounds every run of it is held to. */
+/**
+ * At most [rate] runs every [per], with up to [burst] at once, across every worker on every instance: a provider's
+ * limit is the service's, not one process's. The bucket is a row in `surefold_jobs_buckets`.
+ */
+data class JobRate(val rate: Int, val per: Duration, val burst: Int = rate) {
+    init {
+        require(rate >= 1 && per > ZERO) { "A job rate needs one run or more per a positive time, not $rate per $per." }
+        require(burst >= 1) { "A job rate's burst must hold at least one run, not $burst." }
+    }
+}
+
+/**
+ * A kind of job: its name in the table, how its payload is stored, and the bounds every run of it is held to: a
+ * [deadline] per run, a [concurrency] per worker, and a [rate] across all of them.
+ */
 open class JobKind<P>(
     val name: String,
     val codec: JobCodec<P>,
     val deadline: Duration = 1.minutes,
     val concurrency: Int = 1,
+    val rate: JobRate? = null,
 ) {
     init {
         require(name.isNotBlank()) { "A job kind needs a name." }

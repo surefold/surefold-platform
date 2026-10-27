@@ -1,11 +1,13 @@
 package io.github.matthewjones372.surefold.jobs
 
 import io.github.matthewjones372.surefold.clock
+import java.sql.Connection
 import java.sql.ResultSet
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.util.UUID
 import javax.sql.DataSource
+import kotlin.math.floor
 import kotlin.time.Duration
 import kotlin.time.toJavaDuration
 import kotlin.time.toKotlinDuration
@@ -52,22 +54,86 @@ internal class Queue(private val source: DataSource, private val worker: String)
      * another worker is claiming are skipped rather than waited on.
      */
     fun claim(limit: Int, lease: Duration, kinds: Kinds = Kinds.All, perTenant: Int? = null): List<Claimed> {
+        val rate = (kinds as? Kinds.Only)?.kind?.rate
+        return source.connection.use { connection ->
+            if (rate == null) {
+                claimOn(connection, limit, lease, kinds, perTenant)
+            } else {
+                connection.autoCommit = false
+                try {
+                    val kind = kinds.kind.name
+                    val bucket = connection.bucket(kind, rate)
+                    val claimed = if (bucket.whole() == 0) {
+                        emptyList()
+                    } else {
+                        claimOn(connection, minOf(limit, bucket.whole()), lease, kinds, perTenant)
+                    }
+                    connection.spend(kind, bucket.tokens - claimed.size)
+                    connection.commit()
+                    claimed
+                } finally {
+                    connection.rollbackIfOpen()
+                }
+            }
+        }.sortedWith(compareByDescending<Claimed> { it.priority }.thenBy { it.runAt })
+    }
+
+    private fun claimOn(
+        connection: Connection,
+        limit: Int,
+        lease: Duration,
+        kinds: Kinds,
+        perTenant: Int?,
+    ): List<Claimed> {
         val now = clock.get().now()
         val (filter, names) = when (kinds) {
             Kinds.All -> "" to emptyList()
             is Kinds.Only -> "and kind = ?" to listOf(kinds.kind.name)
             is Kinds.Except -> "and kind <> all(?)" to listOf(kinds.names.toList())
         }
-        return source.connection.use { connection ->
-            val sql = if (perTenant == null) claiming(filter) else claimingFairly(filter)
-            connection.prepareStatement(sql).use { statement ->
-                val bounds = if (perTenant == null) listOf(limit) else listOf(limit * CANDIDATES, perTenant, limit)
-                statement.bind(listOf(now + lease.toJavaDuration(), worker, now, now) + names + bounds)
-                statement.executeQuery().use { rows ->
-                    generateSequence { if (rows.next()) rows.claimed() else null }.toList()
-                }
+        val sql = if (perTenant == null) claiming(filter) else claimingFairly(filter)
+        return connection.prepareStatement(sql).use { statement ->
+            val bounds = if (perTenant == null) listOf(limit) else listOf(limit * CANDIDATES, perTenant, limit)
+            statement.bind(listOf(now + lease.toJavaDuration(), worker, now, now) + names + bounds)
+            statement.executeQuery().use { rows ->
+                generateSequence { if (rows.next()) rows.claimed() else null }.toList()
             }
-        }.sortedWith(compareByDescending<Claimed> { it.priority }.thenBy { it.runAt })
+        }
+    }
+
+    /** What is left in [kind]'s bucket now, refilled from the clock: made full on first use, and locked till commit. */
+    private fun Connection.bucket(kind: String, rate: JobRate): Bucket {
+        val now = clock.get().now()
+        prepareStatement(BUCKET_MADE).use { statement ->
+            statement.bind(listOf(kind, rate.burst.toDouble(), now))
+            statement.executeUpdate()
+        }
+        return prepareStatement(BUCKET_HELD).use { statement ->
+            statement.bind(listOf(kind))
+            statement.executeQuery().use { rows ->
+                rows.next()
+                val held = rows.getDouble(1)
+                val since = rows.getObject(2, OffsetDateTime::class.java).toInstant()
+                val elapsed = java.time.Duration.between(since, now).toKotlinDuration().coerceAtLeast(Duration.ZERO)
+                Bucket(minOf(rate.burst.toDouble(), held + elapsed / (rate.per / rate.rate)))
+            }
+        }
+    }
+
+    private fun Connection.spend(kind: String, left: Double) = prepareStatement(BUCKET_SPENT).use { statement ->
+        statement.bind(listOf(left, clock.get().now(), kind))
+        statement.executeUpdate()
+    }
+
+    private fun Connection.rollbackIfOpen() {
+        if (!autoCommit) {
+            rollback()
+            autoCommit = true
+        }
+    }
+
+    private class Bucket(val tokens: Double) {
+        fun whole(): Int = floor(tokens).toInt()
     }
 
     /** Moves [job] to history as [how], with [error] if given. Answers false when this worker no longer holds it. */
@@ -187,6 +253,14 @@ internal class Queue(private val source: DataSource, private val worker: String)
             returning id, tenant_id, kind, payload::text, payload_version, carried::text, run_at, expires_at, priority,
                 attempts, max_attempts
         """
+
+        const val BUCKET_MADE = """
+            insert into surefold_jobs_buckets (kind, tokens, refilled_at) values (?, ?, ?) on conflict (kind) do nothing
+        """
+
+        const val BUCKET_HELD = "select tokens, refilled_at from surefold_jobs_buckets where kind = ? for update"
+
+        const val BUCKET_SPENT = "update surefold_jobs_buckets set tokens = ?, refilled_at = ? where kind = ?"
 
         const val BACKLOG = """
             select kind, count(*), min(run_at) from surefold_jobs where status = 'pending' and run_at <= ? group by kind
