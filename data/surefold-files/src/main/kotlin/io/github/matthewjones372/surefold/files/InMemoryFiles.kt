@@ -6,9 +6,12 @@ import io.github.matthewjones372.surefold.fail.left
 import io.github.matthewjones372.surefold.fail.right
 import java.io.ByteArrayInputStream
 import java.io.InputStream
+import java.net.URI
 import java.security.MessageDigest
 import java.util.HexFormat
 import java.util.concurrent.ConcurrentSkipListMap
+import kotlin.time.Duration
+import kotlin.time.toJavaDuration
 
 /** A [Files] in memory, for tests: the same answers and failures as a store, and nothing kept past the process. */
 class InMemoryFiles(override val maxSize: Long = Long.MAX_VALUE) : Files {
@@ -53,6 +56,47 @@ class InMemoryFiles(override val maxSize: Long = Long.MAX_VALUE) : Files {
         val meta = source.meta.copy(key = to, modified = clock.get().now())
         stored[to.value] = Stored(source.bytes, meta)
         return meta.right()
+    }
+
+    override fun presignPut(
+        key: FileKey,
+        expiresIn: Duration,
+        contentType: String,
+        size: Long,
+    ): Either<FileError, Presigned> {
+        require(expiresIn > Duration.ZERO && expiresIn <= LONGEST_PRESIGN) { "A presigned URL lasts up to 7 days." }
+        if (size > maxSize) return FileError.TooLarge(key, size, maxSize).left()
+        val headers = mapOf("content-type" to contentType, "content-length" to "$size")
+        return Presigned(URI("memory:///$key"), "PUT", headers, clock.get().now() + expiresIn.toJavaDuration()).right()
+    }
+
+    override fun presignGet(key: FileKey, expiresIn: Duration): Either<FileError, Presigned> {
+        require(expiresIn > Duration.ZERO && expiresIn <= LONGEST_PRESIGN) { "A presigned URL lasts up to 7 days." }
+        val expiresAt = clock.get().now() + expiresIn.toJavaDuration()
+        return Presigned(URI("memory:///$key"), "GET", emptyMap(), expiresAt).right()
+    }
+
+    override fun multipart(key: FileKey, contentType: String): Either<FileError, MultipartUpload> =
+        Upload(key, contentType).right()
+
+    private inner class Upload(override val key: FileKey, private val contentType: String) : MultipartUpload {
+        private val parts = ConcurrentSkipListMap<Int, ByteArray>()
+
+        override fun part(number: Int, content: InputStream, size: Long): Either<FileError, Unit> {
+            require(number >= 1) { "Parts are numbered from 1, not $number." }
+            parts[number] = content.readNBytes(size.toInt())
+            return Unit.right()
+        }
+
+        override fun complete(): Either<FileError, FileMeta> {
+            val whole = parts.values.fold(ByteArray(0)) { joined, part -> joined + part }
+            return put(key, ByteArrayInputStream(whole), whole.size.toLong(), contentType)
+        }
+
+        override fun abort(): Either<FileError, Unit> {
+            parts.clear()
+            return Unit.right()
+        }
     }
 
     private fun etag(bytes: ByteArray): String =

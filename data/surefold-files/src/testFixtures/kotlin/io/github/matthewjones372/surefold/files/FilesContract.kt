@@ -4,7 +4,10 @@ import io.github.matthewjones372.surefold.fail.Either
 import io.github.matthewjones372.surefold.junit.Suite
 import io.github.matthewjones372.surefold.junit.shouldBe
 import io.github.matthewjones372.surefold.junit.shouldContainExactly
+import io.github.matthewjones372.surefold.junit.shouldThrow
 import java.io.ByteArrayInputStream
+import kotlin.time.Duration.Companion.days
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * What every [Files] answers, run against each: `InMemoryFiles` here, MinIO in surefold-files-test. A store that
@@ -13,6 +16,9 @@ import java.io.ByteArrayInputStream
 abstract class FilesContract : Suite() {
 
     abstract fun files(): Files
+
+    /** A fresh, empty bucket with no limit of its own, for uploads in parts over S3's 5 MB part size. */
+    abstract fun largeFiles(): Files
 
     init {
         test("a file put is read back, with its size and content type") {
@@ -66,6 +72,36 @@ abstract class FilesContract : Suite() {
             files.list("v/").value().files shouldBe emptyList()
         }
 
+        test("an upload in three parts reads back whole, in part order") {
+            val files = largeFiles()
+            val parts = listOf(FIVE_MB, FIVE_MB, 2 * MB).mapIndexed { index, size ->
+                ByteArray(size) { (index + 1).toByte() }
+            }
+            val upload = files.multipart(key("big.bin"), "application/octet-stream").value()
+            // Sent out of order, as parts sent from several threads arrive.
+            listOf(2, 0, 1).forEach { i ->
+                upload.part(i + 1, ByteArrayInputStream(parts[i]), parts[i].size.toLong()).value()
+            }
+            upload.complete().value().size shouldBe (12 * MB).toLong()
+            val read = files.get(key("big.bin")).value().use { it.stream.readAllBytes() }
+            read.contentEquals(parts.fold(ByteArray(0)) { all, part -> all + part }) shouldBe true
+        }
+
+        test("an aborted upload leaves nothing at its key") {
+            val files = largeFiles()
+            val upload = files.multipart(key("gone.bin"), "application/octet-stream").value()
+            upload.part(1, bytes("x"), 1).value()
+            upload.abort().value()
+            files.head(key("gone.bin")) shouldBe Either.Left(FileError.NotFound(key("gone.bin")))
+        }
+
+        test("a presigned PUT over the store's limit is refused, and one for longer than a week is not made") {
+            val files = files()
+            files.presignPut(key("x"), 1.minutes, "text/plain", files.maxSize + 1) shouldBe
+                Either.Left(FileError.TooLarge(key("x"), files.maxSize + 1, files.maxSize))
+            shouldThrow<IllegalArgumentException> { files.presignGet(key("x"), 8.days) }
+        }
+
         test("a copy is a second file with the same content, and copying a missing file is not found") {
             val files = files()
             files.put(key("from"), bytes("hello"), 5, "text/plain").value()
@@ -76,6 +112,11 @@ abstract class FilesContract : Suite() {
     }
 
     protected fun key(value: String): FileKey = FileKey.of(value).value()
+
+    private companion object {
+        const val MB = 1024 * 1024
+        const val FIVE_MB = 5 * MB
+    }
 
     private fun bytes(text: String) = ByteArrayInputStream(text.encodeToByteArray())
 
