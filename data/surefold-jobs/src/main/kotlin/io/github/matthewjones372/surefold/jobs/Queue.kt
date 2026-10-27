@@ -24,6 +24,16 @@ internal data class Claimed(
     val maxAttempts: Int,
 )
 
+/** Which kinds a claim takes. */
+internal sealed interface Kinds {
+    data object All : Kinds
+
+    data class Only(val kind: JobKind<*>) : Kinds
+
+    /** Every kind but these: the ones no handler here runs. */
+    data class Except(val names: Set<String>) : Kinds
+}
+
 /** How a run left its job, as history records it. */
 internal enum class Finished(val status: String) { Done("done"), Failed("failed"), Skipped("skipped") }
 
@@ -37,11 +47,16 @@ internal class Queue(private val source: DataSource, private val worker: String)
      * Claims up to [limit] due jobs, highest priority and then earliest first, and holds each for [lease]. Rows
      * another worker is claiming are skipped rather than waited on.
      */
-    fun claim(limit: Int, lease: Duration): List<Claimed> {
+    fun claim(limit: Int, lease: Duration, kinds: Kinds = Kinds.All): List<Claimed> {
         val now = clock.get().now()
+        val (filter, names) = when (kinds) {
+            Kinds.All -> "" to emptyList()
+            is Kinds.Only -> "and kind = ?" to listOf(kinds.kind.name)
+            is Kinds.Except -> "and kind <> all(?)" to listOf(kinds.names.toList())
+        }
         return source.connection.use { connection ->
-            connection.prepareStatement(CLAIM).use { statement ->
-                statement.bind(listOf(now + lease.toJavaDuration(), worker, now, now, limit))
+            connection.prepareStatement(claiming(filter)).use { statement ->
+                statement.bind(listOf(now + lease.toJavaDuration(), worker, now, now) + names + limit)
                 statement.executeQuery().use { rows ->
                     generateSequence { if (rows.next()) rows.claimed() else null }.toList()
                 }
@@ -113,11 +128,11 @@ internal class Queue(private val source: DataSource, private val worker: String)
     private fun ResultSet.instant(column: String): Instant? = getObject(column, OffsetDateTime::class.java)?.toInstant()
 
     private companion object {
-        const val CLAIM = """
+        fun claiming(filter: String) = """
             update surefold_jobs
             set status = 'running', locked_until = ?, locked_by = ?, attempts = attempts + 1, updated_at = ?
             where id in (
-                select id from surefold_jobs where status = 'pending' and run_at <= ?
+                select id from surefold_jobs where status = 'pending' and run_at <= ? $filter
                 order by priority desc, run_at limit ? for update skip locked
             )
             returning id, tenant_id, kind, payload::text, payload_version, carried::text, run_at, expires_at, priority,

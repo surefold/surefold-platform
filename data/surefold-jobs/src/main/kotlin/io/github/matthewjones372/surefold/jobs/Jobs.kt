@@ -106,6 +106,7 @@ internal fun PreparedStatement.bind(values: List<Any?>) {
         when (value) {
             null -> setNull(at + 1, Types.VARCHAR)
             is Instant -> setObject(at + 1, value.atOffset(ZoneOffset.UTC))
+            is List<*> -> setArray(at + 1, connection.createArrayOf("text", value.toTypedArray()))
             else -> setObject(at + 1, value)
         }
     }
