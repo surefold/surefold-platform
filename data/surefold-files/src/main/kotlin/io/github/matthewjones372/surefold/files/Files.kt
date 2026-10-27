@@ -2,7 +2,10 @@ package io.github.matthewjones372.surefold.files
 
 import io.github.matthewjones372.surefold.fail.Either
 import java.io.InputStream
+import java.net.URI
 import java.time.Instant
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.days
 
 /** Why a call on a [Files] did not do what it was asked. */
 sealed interface FileError {
@@ -33,6 +36,28 @@ class FileContent(val meta: FileMeta, val stream: InputStream) : AutoCloseable {
 data class FilePage(val files: List<FileMeta>, val next: String?)
 
 /**
+ * A URL a client can send to the store directly, until [expiresAt]: [method] with [headers], named in lower case, set
+ * exactly as given, since they are part of what was signed. A PUT signs its size and content type, so a client cannot
+ * send more.
+ */
+data class Presigned(val url: URI, val method: String, val headers: Map<String, String>, val expiresAt: Instant)
+
+/**
+ * A file uploaded in parts, for one too large to send in one go. Parts are numbered from 1 and may be sent at once
+ * from several threads; on S3 each but the last must be at least 5 MB. [complete] joins them in number order.
+ */
+interface MultipartUpload {
+    val key: FileKey
+
+    fun part(number: Int, content: InputStream, size: Long): Either<FileError, Unit>
+
+    fun complete(): Either<FileError, FileMeta>
+
+    /** Drops the parts sent so far. An upload neither completed nor aborted keeps its parts, and its cost, on S3. */
+    fun abort(): Either<FileError, Unit>
+}
+
+/**
  * A bucket of files: S3 itself, any S3-compatible store, or [InMemoryFiles] in a test. Every call answers its failure
  * as a [FileError]; a store's own exceptions never reach the caller.
  */
@@ -56,4 +81,16 @@ interface Files {
 
     /** Copies [from] to [to] within the bucket, without reading it through this process. */
     fun copy(from: FileKey, to: FileKey): Either<FileError, FileMeta>
+
+    /** A URL to PUT exactly [size] bytes of [contentType] at [key], for [expiresIn], at most seven days. */
+    fun presignPut(key: FileKey, expiresIn: Duration, contentType: String, size: Long): Either<FileError, Presigned>
+
+    /** A URL to GET [key], for [expiresIn], at most seven days. */
+    fun presignGet(key: FileKey, expiresIn: Duration): Either<FileError, Presigned>
+
+    /** Starts an upload of [key] in parts. */
+    fun multipart(key: FileKey, contentType: String): Either<FileError, MultipartUpload>
 }
+
+/** SigV4's limit on how long a presigned URL lasts. */
+internal val LONGEST_PRESIGN: Duration = 7.days

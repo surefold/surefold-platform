@@ -18,14 +18,20 @@ import software.amazon.awssdk.core.sync.RequestBody
 import software.amazon.awssdk.http.urlconnection.UrlConnectionHttpClient
 import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.s3.S3Client
+import software.amazon.awssdk.services.s3.S3Configuration
 import software.amazon.awssdk.services.s3.model.BucketAlreadyOwnedByYouException
+import software.amazon.awssdk.services.s3.model.CompletedPart
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException
 import software.amazon.awssdk.services.s3.model.S3Exception
+import software.amazon.awssdk.services.s3.presigner.S3Presigner
 import java.io.InputStream
 import java.net.URI
+import java.util.concurrent.ConcurrentSkipListMap
 import java.util.concurrent.TimeoutException
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.toJavaDuration
 
 /**
  * Where an S3-compatible bucket is, and how to sign in to it. [endpoint] is null for AWS itself; Cloudflare R2,
@@ -54,6 +60,7 @@ private const val FIVE_GIGABYTES = 5L * 1024 * 1024 * 1024
  */
 class S3Files(
     private val client: S3Client,
+    private val presigner: S3Presigner,
     private val bucket: String,
     override val maxSize: Long,
     private val policy: Policy = defaultPolicy,
@@ -112,7 +119,71 @@ class S3Files(
         headOf(to)
     }
 
-    override fun close() = client.close()
+    override fun presignPut(
+        key: FileKey,
+        expiresIn: Duration,
+        contentType: String,
+        size: Long,
+    ): Either<FileError, Presigned> {
+        require(expiresIn > Duration.ZERO && expiresIn <= LONGEST_PRESIGN) { "A presigned URL lasts up to 7 days." }
+        if (size > maxSize) return Either.Left(FileError.TooLarge(key, size, maxSize))
+        return call("presign put", key) {
+            presigner.presignPutObject { request ->
+                request.signatureDuration(expiresIn.toJavaDuration()).putObjectRequest { put ->
+                    put.bucket(bucket).key(key.value).contentType(contentType).contentLength(size)
+                }
+            }.let { Presigned(it.url().toURI(), "PUT", it.signedHeaders().toPlainHeaders(), it.expiration()) }
+        }
+    }
+
+    override fun presignGet(key: FileKey, expiresIn: Duration): Either<FileError, Presigned> {
+        require(expiresIn > Duration.ZERO && expiresIn <= LONGEST_PRESIGN) { "A presigned URL lasts up to 7 days." }
+        return call("presign get", key) {
+            presigner.presignGetObject { request ->
+                request.signatureDuration(expiresIn.toJavaDuration())
+                    .getObjectRequest { it.bucket(bucket).key(key.value) }
+            }.let { Presigned(it.url().toURI(), "GET", it.signedHeaders().toPlainHeaders(), it.expiration()) }
+        }
+    }
+
+    override fun multipart(key: FileKey, contentType: String): Either<FileError, MultipartUpload> =
+        call("start multipart", key) {
+            val started = client.createMultipartUpload { it.bucket(bucket).key(key.value).contentType(contentType) }
+            S3Upload(key, started.uploadId())
+        }
+
+    private inner class S3Upload(override val key: FileKey, private val id: String) : MultipartUpload {
+        private val etags = ConcurrentSkipListMap<Int, String>()
+
+        override fun part(number: Int, content: InputStream, size: Long): Either<FileError, Unit> {
+            require(number in 1..MOST_PARTS) { "Parts are numbered 1 to $MOST_PARTS, not $number." }
+            return call<Unit>("upload part", key) {
+                val etag = client.uploadPart(
+                    { it.bucket(bucket).key(key.value).uploadId(id).partNumber(number).contentLength(size) },
+                    RequestBody.fromInputStream(content, size),
+                ).eTag()
+                etags[number] = etag
+                counter(BYTES, "direction" to "in").increment(size.toDouble())
+            }
+        }
+
+        override fun complete(): Either<FileError, FileMeta> = call("complete multipart", key) {
+            val parts = etags.map { (number, etag) -> CompletedPart.builder().partNumber(number).eTag(etag).build() }
+            client.completeMultipartUpload { request ->
+                request.bucket(bucket).key(key.value).uploadId(id).multipartUpload { it.parts(parts) }
+            }
+            headOf(key)
+        }
+
+        override fun abort(): Either<FileError, Unit> = call<Unit>("abort multipart", key) {
+            client.abortMultipartUpload { it.bucket(bucket).key(key.value).uploadId(id) }
+        }
+    }
+
+    override fun close() {
+        presigner.close()
+        client.close()
+    }
 
     /** Creates this store's bucket, for a test or a first start; a bucket already there is left as it is. */
     fun createBucket(): Either<FileError, Unit> = call<Unit>("create bucket", null) {
@@ -157,6 +228,7 @@ class S3Files(
         private const val DURATION = "surefold.files.duration.seconds"
         private const val BYTES = "surefold.files.bytes"
         private const val MOST_LISTED = 1_000
+        private const val MOST_PARTS = 10_000
         private const val NOT_FOUND = 404
         private const val FORBIDDEN = 403
         private const val THROTTLED = 429
@@ -194,10 +266,22 @@ class S3Files(
                 .responseChecksumValidation(ResponseChecksumValidation.WHEN_REQUIRED)
                 .apply { config.endpoint?.let { endpointOverride(it) } }
                 .build()
-            return S3Files(client, config.bucket, config.maxSize, policy)
+            val presigner = S3Presigner.builder()
+                .region(Region.of(config.region))
+                .credentialsProvider(
+                    StaticCredentialsProvider.create(AwsBasicCredentials.create(config.accessKey, config.secretKey)),
+                )
+                .serviceConfiguration(S3Configuration.builder().pathStyleAccessEnabled(config.pathStyle).build())
+                .apply { config.endpoint?.let { endpointOverride(it) } }
+                .build()
+            return S3Files(client, presigner, config.bucket, config.maxSize, policy)
         }
     }
 }
+
+/** A presigned request's signed headers, each with its one value, which is all S3 ever signs. */
+private fun Map<String, List<String>>.toPlainHeaders(): Map<String, String> =
+    filterKeys { !it.equals("host", ignoreCase = true) }.mapValues { (_, values) -> values.joinToString(",") }
 
 /** The key, for a key already checked once: a store only hands back keys that were put through [FileKey.of]. */
 internal fun Either<FileError.InvalidKey, FileKey>.orThrow(): FileKey = when (this) {
