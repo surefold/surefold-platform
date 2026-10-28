@@ -5,11 +5,14 @@ import io.github.matthewjones372.surefold.fail.Either
 import io.github.matthewjones372.surefold.fail.left
 import io.github.matthewjones372.surefold.fail.right
 import io.github.matthewjones372.surefold.increment
+import io.github.matthewjones372.surefold.logError
 import io.github.matthewjones372.surefold.logWarn
 import io.github.matthewjones372.surefold.tenancy.currentTenant
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.security.SecureRandom
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
@@ -26,6 +29,9 @@ sealed interface SealError {
 
     /** Not a value sealed for this owner and place: moved, altered or truncated. Never an empty value. */
     data object Tampered : SealError
+
+    /** Sealed under a key version that is gone: retired, or never this owner's. */
+    data class UnknownVersion(val version: Int) : SealError
 }
 
 /**
@@ -54,6 +60,7 @@ class TenantCipher(private val keys: KeyRing, private val pad: Boolean = true) {
                 val nonce = ByteArray(NONCE_BYTES).also(random::nextBytes)
                 val header = header(key.value.version)
                 val associated = header + associated(owner, place)
+                counted(owner, key.value.version)
                 (header + nonce + gcm(Cipher.ENCRYPT_MODE, material, nonce, associated, body(plaintext))).right()
             }
         }
@@ -67,7 +74,10 @@ class TenantCipher(private val keys: KeyRing, private val pad: Boolean = true) {
         if (sealed.size < HEADER_BYTES + NONCE_BYTES + TAG_BYTES || sealed[0] != FORMAT) return tampered(place)
         val version = ByteBuffer.wrap(sealed, 1, VERSION_BYTES).int
         return when (val key = keys.version(owner, KeyPurpose.Enc, version)) {
-            is Either.Left -> SealError.Keys(key.value).left()
+            is Either.Left -> when (key.value) {
+                is KeyError.Invalid -> SealError.UnknownVersion(version)
+                else -> SealError.Keys(key.value)
+            }.left()
 
             is Either.Right -> key.value.using { material ->
                 val header = sealed.copyOfRange(0, HEADER_BYTES)
@@ -83,7 +93,47 @@ class TenantCipher(private val keys: KeyRing, private val pad: Boolean = true) {
         }
     }
 
+    /**
+     * [sealed] opened and sealed again under the active version, or null when it already is: what a re-encryption
+     * job writes back, in chunks, until no row refers to an older version and it can be retired.
+     */
+    fun reseal(owner: KeyOwner, sealed: ByteArray, place: Place): Either<SealError, ByteArray?> {
+        val active = when (val key = keys.current(owner, KeyPurpose.Enc)) {
+            is Either.Left -> return SealError.Keys(key.value).left()
+            is Either.Right -> key.value.also { it.material.fill(0) }.version
+        }
+        if (sealed.size >= HEADER_BYTES && ByteBuffer.wrap(sealed, 1, VERSION_BYTES).int == active) return null.right()
+        return when (val opened = open(owner, sealed, place)) {
+            is Either.Left -> opened
+
+            is Either.Right -> try {
+                seal(owner, opened.value, place)
+            } finally {
+                opened.value.fill(0)
+            }
+        }
+    }
+
+    /** [reseal] as the bound tenant. */
+    fun reseal(sealed: ByteArray, place: Place): Either<SealError, ByteArray?> =
+        bound()?.let { reseal(it, sealed, place) } ?: SealError.Keys(KeyError.NoTenant).left()
+
     private fun bound(): KeyOwner? = currentTenant()?.let(KeyOwner::Tenant)
+
+    /**
+     * Counts an encryption under [owner]'s [version]. GCM with random nonces is safe to about 2^32 encryptions a key,
+     * and rotation keeps each version far below; this process's count past 2^30 logs an error, so a version that
+     * nears it is rotated long before.
+     */
+    private fun counted(owner: KeyOwner, version: Int) {
+        counter("tenancy.crypto.encryptions", "owner" to named(owner), "version" to version.toString()).increment()
+        val seen = sealedBy.computeIfAbsent(owner to version) { AtomicLong() }.incrementAndGet()
+        if (seen == NEAR_GCM_LIMIT) {
+            logError("surefold-tenancy-crypto: ${named(owner)}'s enc v$version has sealed 2^30 values here: rotate it")
+        }
+    }
+
+    private val sealedBy = ConcurrentHashMap<Pair<KeyOwner, Int>, AtomicLong>()
 
     /** The length, the value, and with [pad] zeros to the next multiple of 16 bytes. */
     private fun body(plaintext: ByteArray): ByteArray {
@@ -122,6 +172,13 @@ class TenantCipher(private val keys: KeyRing, private val pad: Boolean = true) {
         const val LENGTH_BYTES = 4
         const val BLOCK = 16
 
+        const val NEAR_GCM_LIMIT = 1L shl 30
+
+        fun named(owner: KeyOwner): String = when (owner) {
+            is KeyOwner.Tenant -> "tenant:${owner.id.value}"
+            KeyOwner.Platform -> "platform"
+        }
+
         fun header(version: Int): ByteArray = ByteBuffer.allocate(HEADER_BYTES).put(FORMAT).putInt(version).array()
 
         /**
@@ -130,10 +187,7 @@ class TenantCipher(private val keys: KeyRing, private val pad: Boolean = true) {
          */
         fun associated(owner: KeyOwner, place: Place): ByteArray {
             val parts = listOf(
-                when (owner) {
-                    is KeyOwner.Tenant -> "tenant:${owner.id.value}"
-                    KeyOwner.Platform -> "platform"
-                },
+                named(owner),
                 place.table,
                 place.column,
                 place.row,

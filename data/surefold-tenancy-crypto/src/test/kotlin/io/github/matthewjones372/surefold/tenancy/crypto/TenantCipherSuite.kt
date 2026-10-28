@@ -19,10 +19,12 @@ object TenantCipherSuite : Suite() {
     /** Fixed keys, one per owner, purpose and version, as TenantKeys would answer them unwrapped. */
     private class FixedRing(var active: Int = 1) : KeyRing {
         private val keys = mutableMapOf<Triple<KeyOwner, KeyPurpose, Int>, ByteArray>()
+        val retired = mutableSetOf<Int>()
 
         override fun current(owner: KeyOwner, purpose: KeyPurpose) = version(owner, purpose, active)
 
         override fun version(owner: KeyOwner, purpose: KeyPurpose, version: Int): Either<KeyError, DataKey> {
+            if (version in retired) return Either.Left(KeyError.Invalid("v$version is retired"))
             val bytes = keys.getOrPut(Triple(owner, purpose, version)) { ByteArray(32).also(SecureRandom()::nextBytes) }
             return Either.Right(DataKey(owner, purpose, version, bytes.copyOf()))
         }
@@ -98,6 +100,34 @@ object TenantCipherSuite : Suite() {
             } shouldBe listOf(16, 32, 32)
             exact.seal(acme, "a".toByteArray(), email).held().size - overhead shouldBe 5
             exact.open(acme, exact.seal(acme, ByteArray(0), email).held(), email).held().size shouldBe 0
+        }
+
+        test("after a rotation, a version 1 value opens, reseals to version 2, and is unknown once 1 retires") {
+            val ring = FixedRing()
+            val cipher = TenantCipher(ring)
+            val first = cipher.seal(acme, "jo@example.com".toByteArray(), email).held()
+
+            ring.active = 2
+
+            cipher.open(acme, first, email).held().decodeToString() shouldBe "jo@example.com"
+            val second = cipher.reseal(acme, first, email).held()!!
+            java.nio.ByteBuffer.wrap(second, 1, 4).int shouldBe 2
+            cipher.open(acme, second, email).held().decodeToString() shouldBe "jo@example.com"
+            cipher.reseal(acme, second, email).held() shouldBe null
+
+            ring.retired += 1
+
+            cipher.open(acme, first, email) shouldBe Either.Left(SealError.UnknownVersion(1))
+            cipher.open(acme, second, email).held().decodeToString() shouldBe "jo@example.com"
+        }
+
+        test("a value in the wrong place is refused by reseal too, as Tampered") {
+            val ring = FixedRing()
+            val cipher = TenantCipher(ring)
+            val first = cipher.seal(acme, "jo@example.com".toByteArray(), email).held()
+            ring.active = 2
+
+            cipher.reseal(acme, first, email.copy(row = "c-2")) shouldBe Either.Left(SealError.Tampered)
         }
 
         test("the envelope names its version, a key error is answered as one, and no tenant is NoTenant") {
