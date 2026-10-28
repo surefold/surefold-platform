@@ -8,6 +8,7 @@ import io.github.matthewjones372.surefold.tenancy.RlsDatabase
 import io.github.matthewjones372.surefold.tenancy.TenantId
 import io.github.matthewjones372.surefold.tenancy.TenantTransactions
 import io.github.matthewjones372.surefold.tenancy.withTenant
+import org.postgresql.PGConnection
 
 /** Every owner's keys in Postgres, under its own root, and one tenant's rows out of another's reach (spec 0235). */
 object TenantKeysSuite : Suite() {
@@ -102,6 +103,21 @@ object TenantKeysSuite : Suite() {
                     }
                 }
             } shouldBe 0
+        }
+
+        test("a rotation is current at once here, and notifies every other process once it commits") {
+            val held = Fixture()
+            held.keys.provision(acme).held()
+            held.keys.current(acme, KeyPurpose.Enc).held().version shouldBe 1
+            held.database.owner.connection.use { listening ->
+                listening.createStatement().use { it.execute("listen ${TenantKeys.CHANNEL}") }
+
+                held.keys.rotate(acme).held()
+
+                held.keys.current(acme, KeyPurpose.Enc).held().version shouldBe 2
+                val heard = listening.unwrap(PGConnection::class.java).getNotifications(10_000).orEmpty()
+                heard.map { it.name to it.parameter } shouldBe listOf(TenantKeys.CHANNEL to "acme")
+            }
         }
 
         test("a KMS that cannot be reached leaves no key row behind") {

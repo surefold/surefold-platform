@@ -4,6 +4,7 @@ import io.github.matthewjones372.surefold.clock
 import io.github.matthewjones372.surefold.fail.Either
 import io.github.matthewjones372.surefold.fail.left
 import io.github.matthewjones372.surefold.fail.right
+import io.github.matthewjones372.surefold.tenancy.TenantId
 import io.github.matthewjones372.surefold.tenancy.TenantTransactions
 import io.github.matthewjones372.surefold.tenancy.currentTenant
 import java.sql.Connection
@@ -18,9 +19,15 @@ class DataKey(val owner: KeyOwner, val purpose: KeyPurpose, val version: Int, va
 /**
  * Every owner's data keys, in `surefold_tenant_keys`, each wrapped under that owner's root key in [kms]. A tenant's
  * rows are read and written in that tenant's own transaction, under the table's row-level security policy, and the
- * platform's in a system transaction. Two of the same owner's writes are taken one at a time.
+ * platform's in a system transaction. Two of the same owner's writes are taken one at a time. Keys are read through
+ * [cache]; a rotation or retirement evicts the owner here and notifies [CHANNEL] as it commits, so that every other
+ * process listening on it can call [evictNotified].
  */
-class TenantKeys(private val tenants: TenantTransactions, private val kms: Kms) {
+class TenantKeys(
+    private val tenants: TenantTransactions,
+    private val kms: Kms,
+    private val cache: KeyCache = KeyCache(),
+) {
 
     /** A root key for [owner] and version 1 of each purpose; nothing, for an owner already provisioned. */
     fun provision(owner: KeyOwner): Either<KeyError, Unit> = writing(owner) { connection ->
@@ -36,7 +43,7 @@ class TenantKeys(private val tenants: TenantTransactions, private val kms: Kms) 
 
     /** The active key of [purpose] for [owner], which new values are sealed under. */
     fun current(owner: KeyOwner, purpose: KeyPurpose): Either<KeyError, DataKey> =
-        unwrapped(owner, purpose, "state = 'active'")
+        cache.get(KeyCache.Slot(owner, purpose, null)) { unwrapped(owner, purpose, "state = 'active'") }
 
     /** Version [version] of the bound tenant's [purpose], to open or look up what it wrote. */
     fun version(purpose: KeyPurpose, version: Int): Either<KeyError, DataKey> =
@@ -44,7 +51,11 @@ class TenantKeys(private val tenants: TenantTransactions, private val kms: Kms) 
 
     /** Version [version] of [owner]'s [purpose], active or not. */
     fun version(owner: KeyOwner, purpose: KeyPurpose, version: Int): Either<KeyError, DataKey> =
-        unwrapped(owner, purpose, "version = $version")
+        cache.get(KeyCache.Slot(owner, purpose, version)) { unwrapped(owner, purpose, "version = $version") }
+
+    /** Evicts the owner a [CHANNEL] notification names: another process rotated, retired or shredded its keys. */
+    fun evictNotified(payload: String) =
+        cache.evict(if (payload.isEmpty()) KeyOwner.Platform else KeyOwner.Tenant(TenantId(payload)))
 
     /** Version n+1 of each of [owner]'s purposes, now active; the versions before it stay, to open what they wrote. */
     fun rotate(owner: KeyOwner): Either<KeyError, Unit> = writing(owner) { connection ->
@@ -55,6 +66,7 @@ class TenantKeys(private val tenants: TenantTransactions, private val kms: Kms) 
         }.single()
         connection.update("update surefold_tenant_keys set state = 'decrypt_only' where tenant_id = ?", owner)
         newest.forEach { (purpose, version) -> insert(connection, owner, purpose, version + 1, RootKey(root)) }
+        changed(connection, owner)
     }
 
     /** Deletes [owner]'s [version] of [purpose], once no row refers to it; the active version is never retired. */
@@ -64,6 +76,12 @@ class TenantKeys(private val tenants: TenantTransactions, private val kms: Kms) 
         if (it.update(sql, owner) == 0) {
             throw Refused(KeyError.Invalid("$owner's ${purpose.label} v$version is active, or not there to retire"))
         }
+        changed(it, owner)
+    }
+
+    /** Tells every process listening on [CHANNEL] that [owner]'s keys changed, once [connection] commits. */
+    private fun changed(connection: Connection, owner: KeyOwner) {
+        connection.query("select pg_notify('$CHANNEL', ?)", owner) { }
     }
 
     private fun bound(): KeyOwner? = currentTenant()?.let(KeyOwner::Tenant)
@@ -83,7 +101,10 @@ class TenantKeys(private val tenants: TenantTransactions, private val kms: Kms) 
         }
     }
 
-    /** [block] in [owner]'s transaction, after any other writer of [owner]'s keys; a KMS refusal rolls it back. */
+    /**
+     * [block] in [owner]'s transaction, after any other writer of [owner]'s keys; a KMS refusal rolls it back. [owner]
+     * is evicted here once it ends, so a read in between cannot keep what it replaced.
+     */
     private fun writing(owner: KeyOwner, block: (Connection) -> Unit): Either<KeyError, Unit> = try {
         within(owner) { connection ->
             connection.query("select pg_advisory_xact_lock(hashtext('surefold_tenant_keys:' || ?))", owner) { }
@@ -91,7 +112,7 @@ class TenantKeys(private val tenants: TenantTransactions, private val kms: Kms) 
         }.right()
     } catch (refused: Refused) {
         refused.error.left()
-    }
+    }.also { cache.evict(owner) }
 
     private fun <A> within(owner: KeyOwner, block: (Connection) -> A): A = when (owner) {
         is KeyOwner.Tenant -> tenants.transaction(owner.id, block)
@@ -124,14 +145,20 @@ class TenantKeys(private val tenants: TenantTransactions, private val kms: Kms) 
     /** A KMS refusal, thrown out of a transaction so that it rolls back, and answered as the value it carries. */
     private class Refused(val error: KeyError) : RuntimeException(error.toString(), null, false, false)
 
-    private companion object {
-        const val SYSTEM_ACTOR = "surefold-tenancy-crypto"
-        const val INSERT = "insert into surefold_tenant_keys " +
+    companion object {
+        /** What a change to an owner's keys is notified on, with the owner's `tenant_id` as the payload. */
+        const val CHANNEL = "surefold_tenant_keys"
+
+        private const val SYSTEM_ACTOR = "surefold-tenancy-crypto"
+        private const val INSERT = "insert into surefold_tenant_keys " +
             "(tenant_id, purpose, version, wrapped, root, state, created_at) values (?, ?, ?, ?, ?, 'active', ?)"
     }
 }
 
-/** The `tenant_id` an owner's rows carry: the tenant's id, or `''` for the platform, which no tenant id can be. */
+/**
+ * The `tenant_id` an owner's rows carry, and its [TenantKeys.CHANNEL] payload: the tenant's id, or `''` for the
+ * platform, which no tenant id can be.
+ */
 private fun column(owner: KeyOwner): String = when (owner) {
     is KeyOwner.Tenant -> owner.id.value
     KeyOwner.Platform -> ""
