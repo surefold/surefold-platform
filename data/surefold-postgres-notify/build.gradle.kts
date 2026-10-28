@@ -11,6 +11,9 @@ dependencies {
 }
 
 tasks.test {
+    // GuideSuite holds docs/postgres-notify.md to this module's GuideExample.kt.
+    inputs.file(rootProject.layout.projectDirectory.file("docs/postgres-notify.md")).withPropertyName("guide")
+    systemProperty("surefold.postgres.notify.repoRoot", rootProject.projectDir.absolutePath)
     val mainRuntime = configurations.runtimeClasspath
     inputs.files(mainRuntime).withPropertyName("mainRuntimeClasspath")
     jvmArgumentProviders.add(

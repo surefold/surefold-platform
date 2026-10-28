@@ -1,9 +1,16 @@
 package io.github.matthewjones372.surefold.jobs
 
+import io.github.matthewjones372.surefold.Schedule
 import io.github.matthewjones372.surefold.clock
 import io.github.matthewjones372.surefold.gauge
 import io.github.matthewjones372.surefold.logInfo
 import io.github.matthewjones372.surefold.logWarn
+import io.github.matthewjones372.surefold.postgres.notify.PostgresNotifications
+import io.github.matthewjones372.surefold.stream.Exit
+import io.github.matthewjones372.surefold.stream.Forks
+import io.github.matthewjones372.surefold.stream.Running
+import io.github.matthewjones372.surefold.stream.runFold
+import io.github.matthewjones372.surefold.stream.start
 import io.github.matthewjones372.surefold.surefoldFuture
 import java.sql.SQLException
 import java.util.UUID
@@ -70,7 +77,7 @@ class JobWorker(
     private var woken = false
 
     @Volatile
-    private var listener: Listener? = null
+    private var listener: Running<Nothing, Unit>? = null
 
     @Volatile
     private var loop: CompletableFuture<Unit>? = null
@@ -80,7 +87,28 @@ class JobWorker(
         check(loop == null) { "job worker $name has already started" }
         logInfo("surefold-jobs: worker $name started, handling ${handlers.byName.keys.sorted()}")
         loop = surefoldFuture { polling() }
-        if (settings.listen) listener = Listener(source, settings.poll, ::wake)
+        if (settings.listen) listener = listening()
+    }
+
+    /**
+     * One connection that `LISTEN`s on [CHANNEL] and wakes the loop for every notification, and for every reconnect,
+     * since one sent meanwhile is gone. Its reconnects start at [JobSettings.poll]; a run that ends leaves the loop
+     * polling.
+     */
+    private fun listening(): Running<Nothing, Unit> {
+        val reconnect = Schedule.exponential<Throwable>(settings.poll)
+            .delayed { _, delay -> minOf(delay, 30.seconds) }
+            .jittered(min = 0.5, max = 1.0)
+        return PostgresNotifications.listen(source, setOf(CHANNEL), reconnect)
+            .runFold(Unit) { _, _ -> wake() }
+            .start(Forks())
+            .also { running ->
+                running.exit.thenAccept { exit ->
+                    if (exit is Exit.Died) {
+                        logWarn("surefold-jobs: worker $name stopped listening, and only polls: ${exit.cause}")
+                    }
+                }
+            }
     }
 
     private fun polling() {
