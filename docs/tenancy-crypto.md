@@ -3,7 +3,6 @@
 `surefold-tenancy-crypto` gives every tenant data keys of its own, wrapped under a root key that only a KMS holds. A
 backup, a snapshot shared by mistake or a restored side database holds the wrapped keys and never the root, so it
 cannot open what they sealed. Delete a tenant's root and every copy of its data is unreadable, backups included.
-Sealing values with these keys is spec 0236's.
 
 ```kotlin
 dependencies {
@@ -31,6 +30,51 @@ deleted root, a policy), `Invalid` when the key, root or context is wrong, and `
 
 `KeyOwner.Platform` owns the keys of data that belongs to no tenant, such as the service's own staff. Its rows carry
 `tenant_id = ''`, which no `TenantId` can be, and are read in an audited system transaction.
+
+## Sealing values
+
+```kotlin
+val cipher = TenantCipher(keys)
+val place = Place(table = "customers", column = "email", row = customerId.toString())
+
+val sealed = cipher.seal(email.toByteArray(), place)   // Either<SealError, ByteArray>, for a bytea column
+val opened = cipher.open(stored, place)                // the value, or why not
+cipher.reseal(stored, place)                           // under the active version, or null when it already is
+```
+
+A value is sealed with AES-256-GCM under the active `enc` version, with a fresh random nonce. The stored bytes are a
+format byte, the key version, the nonce, the ciphertext and its tag, so `open` finds the version it needs after a
+rotation. The tenant, table, column and row are bound in as associated data: copied to another row, column, table or
+tenant, or altered by a byte, a value fails as `SealError.Tampered`, logged and counted, never as an empty value. A
+value under a retired version is `SealError.UnknownVersion`.
+
+Values are padded to a multiple of 16 bytes, so a stored length says a bucket rather than how long a name is;
+`TenantCipher(keys, pad = false)` turns it off for values of fixed length. Before retiring a version, a job rewrites
+each row with `reseal` in chunks, on `surefold-jobs`, until none refers to it. `tenancy.crypto.encryptions` counts
+seals by owner and version; rotate a version long before it nears 2^32 seals.
+
+## Looking values up
+
+A sealed column cannot be searched, so a column that is looked up by equality gets a second one beside it, its blind
+index:
+
+```kotlin
+val index = BlindIndex(keys)
+val email = Field("customers", "email")
+
+index.of(normalised, email)            // store in email_bidx, beside the sealed email
+index.candidates(normalised, email)    // where email_bidx = any(?): one per live version
+```
+
+An index is `HMAC-SHA-256` under the tenant's `bidx` key, which never seals, of the table, column and value. The same
+email in two columns, or in two tenants, indexes differently. `candidates` answers one index per version not yet
+retired, so a row written before a rotation and one written after are both found; reindex rows with `of` before
+retiring a version, as for `reseal`. Pass the value normalised: an email lower-cased, a phone as E.164.
+
+What an index leaks: anyone who can read the table sees which rows hold equal values, and how often one recurs, so a
+column with few distinct values (a country, a yes or no) gives itself away and should not be indexed. It does not leak
+the value, and without the `bidx` key no one can test a guess against it. Prefix, fuzzy and name search leak far more,
+and are not offered.
 
 ## The table
 
