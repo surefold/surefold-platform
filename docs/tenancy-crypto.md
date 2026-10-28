@@ -1,0 +1,97 @@
+# Keys per tenant
+
+`surefold-tenancy-crypto` gives every tenant data keys of its own, wrapped under a root key that only a KMS holds. A
+backup, a snapshot shared by mistake or a restored side database holds the wrapped keys and never the root, so it
+cannot open what they sealed. Delete a tenant's root and every copy of its data is unreadable, backups included.
+Sealing values with these keys is spec 0236's.
+
+```kotlin
+dependencies {
+    implementation("io.github.matthewjones372:surefold-tenancy-crypto:0.14.0")
+    implementation("io.github.matthewjones372:surefold-tenancy-crypto-aws:0.14.0") // AwsKms
+}
+```
+
+## Keys
+
+```kotlin
+val kms: Kms = AwsKms(AwsKms.client(), aliasPrefix = "alias/bookings/prod/tenant/")   // InMemoryKms() in tests
+val keys = TenantKeys(TenantTransactions(app, system), kms, KeyCache(soft = 15.minutes, hard = 60.minutes))
+
+keys.provision(KeyOwner.Tenant(acme))         // a root, and version 1 of enc and bidx; a second call does nothing
+keys.current(KeyPurpose.Enc)                  // the bound tenant's active key, for sealing
+keys.version(KeyPurpose.Bidx, 3)              // an older version, to open or look up what it wrote
+keys.rotate(KeyOwner.Tenant(acme))            // version n+1 of each, now active; older ones still open
+keys.retire(KeyOwner.Tenant(acme), KeyPurpose.Enc, 1)   // once no row refers to version 1
+keys.shred(KeyOwner.Tenant(acme), waiting = 30.days)    // deletes its rows, schedules its root's deletion
+```
+
+Every call answers `Either<KeyError, _>`: `Unavailable` when the KMS cannot be reached, `Denied` when it refuses (a
+deleted root, a policy), `Invalid` when the key, root or context is wrong, and `NoTenant` when none is bound.
+
+`KeyOwner.Platform` owns the keys of data that belongs to no tenant, such as the service's own staff. Its rows carry
+`tenant_id = ''`, which no `TenantId` can be, and are read in an audited system transaction.
+
+## The table
+
+Include the changelog after `surefold-tenancy`'s: `<include file="surefold/tenancy-crypto/postgres.sql"/>`, or on
+Flyway `flyway(SurefoldSchema.TENANCY_CRYPTO, …)`. It creates `surefold_tenant_keys` with row-level security forced
+and the tenant policy every tenant table gets, so a tenant's transaction reads its own key rows and no one else's:
+
+```sql
+create policy tenant_isolation on surefold_tenant_keys
+    using (tenant_id = current_setting('app.tenant_id', true))
+    with check (tenant_id = current_setting('app.tenant_id', true));
+```
+
+Grants are the service's. The application role needs `select, insert, update, delete` on the table; a key's bytes
+are only ever stored wrapped.
+
+## The cache, across processes
+
+`KeyCache` keeps unwrapped keys in memory: refreshed from the KMS after `soft`, still served up to `hard` while the KMS
+cannot be reached, and refused after. Past its size the least recently used tenant's keys go, zeroed. Each caller gets
+a copy of the bytes, so use a `DataKey` for one operation and let it go.
+
+A rotation, a retirement or a shredding evicts the owner in the process that made it, and notifies
+`TenantKeys.CHANNEL` as it commits. Every other process evicts on that notification with `surefold-postgres-notify`:
+
+```kotlin
+PostgresNotifications.listen(listenSource, setOf(TenantKeys.CHANNEL))
+    .runFold(Unit) { _, notice -> if (notice is Notice.Received) keys.evictNotified(notice.payload) }
+    .start(Forks())
+```
+
+Without it, another process uses the old version for at most `soft`.
+
+## AWS KMS
+
+`AwsKms` makes one symmetric customer managed key per owner, found by `aliasPrefix` plus the tenant id (or
+`platform`). Tenant ids that cannot name an alias, anything beyond letters, digits, `/`, `_` and `-`, are refused.
+Every data key is wrapped with the encryption context `{tenant_id, purpose, version}`, or `{platform, purpose,
+version}`, and KMS refuses an unwrap under any other.
+
+Give only the worker that provisions, rotates and shreds the rights to make keys, and the application only the right
+to unwrap under this prefix. The application role's policy:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": "kms:Decrypt",
+  "Resource": "*",
+  "Condition": {
+    "ForAnyValue:StringLike": { "kms:ResourceAliases": "alias/bookings/prod/tenant/*" },
+    "Null": { "kms:EncryptionContext:purpose": "false", "kms:EncryptionContext:version": "false" }
+  }
+}
+```
+
+The worker's adds `kms:CreateKey`, `kms:TagResource`, `kms:CreateAlias`, `kms:DescribeKey`, `kms:GenerateDataKey`,
+`kms:ListAliases`, `kms:DeleteAlias` and `kms:ScheduleKeyDeletion`, under the same alias condition where KMS
+supports it.
+
+## Shredding
+
+`shred` deletes the owner's key rows and schedules each root it named for deletion after `waiting`, which KMS rounds
+into 7 to 30 days, in one transaction: a KMS that refuses leaves the rows. Until KMS deletes the key, an operator can
+cancel the deletion; after, nothing can unwrap the tenant's keys, in the live database or in any copy of it.
