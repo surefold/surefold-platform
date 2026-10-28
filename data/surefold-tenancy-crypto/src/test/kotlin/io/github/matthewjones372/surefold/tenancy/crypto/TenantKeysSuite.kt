@@ -9,6 +9,9 @@ import io.github.matthewjones372.surefold.tenancy.TenantId
 import io.github.matthewjones372.surefold.tenancy.TenantTransactions
 import io.github.matthewjones372.surefold.tenancy.withTenant
 import org.postgresql.PGConnection
+import java.sql.Connection
+import java.sql.ResultSet
+import kotlin.time.Duration.Companion.days
 
 /** Every owner's keys in Postgres, under its own root, and one tenant's rows out of another's reach (spec 0235). */
 object TenantKeysSuite : Suite() {
@@ -24,6 +27,18 @@ object TenantKeysSuite : Suite() {
         val tenants = TenantTransactions(database.app, database.system)
         val keys = TenantKeys(tenants, InMemoryKms())
     }
+
+    /** One key row as a copy of the database holds it. */
+    private class Copied(val purpose: String, val version: Int, val wrapped: ByteArray, val root: String)
+
+    /** Every key row [connection] can read, as a copy taken now would hold them. */
+    private fun copied(connection: Connection): List<Copied> = connection.createStatement().use { statement ->
+        statement.executeQuery("select purpose, version, wrapped, root from surefold_tenant_keys").use { rows ->
+            generateSequence { rows.takeIf { it.next() }?.let(::copiedRow) }.toList()
+        }
+    }
+
+    private fun copiedRow(row: ResultSet) = Copied(row.getString(1), row.getInt(2), row.getBytes(3), row.getString(4))
 
     private fun <A> Either<KeyError, A>.held(): A = (this as Either.Right).value
 
@@ -118,6 +133,30 @@ object TenantKeysSuite : Suite() {
                 val heard = listening.unwrap(PGConnection::class.java).getNotifications(10_000).orEmpty()
                 heard.map { it.name to it.parameter } shouldBe listOf(TenantKeys.CHANNEL to "acme")
             }
+        }
+
+        test("after shred, the tenant's rows from a copy taken before it cannot be unwrapped") {
+            val database = RlsDatabase(bookings = false).apply {
+                apply("surefold/tenancy-crypto/postgres.sql")
+                grantTo("surefold_tenant_keys")
+            }
+            val kms = InMemoryKms()
+            val tenants = TenantTransactions(database.app, database.system)
+            val keys = TenantKeys(tenants, kms)
+            keys.provision(acme).held()
+            keys.provision(globex).held()
+            val copy = tenants.transaction(TenantId("acme")) { connection -> copied(connection) }
+
+            keys.shred(acme, waiting = 30.days).held()
+
+            copy.size shouldBe 2
+            copy.forEach { row ->
+                val purpose = KeyPurpose.entries.single { it.label == row.purpose }
+                kms.decrypt(RootKey(row.root), row.wrapped, KeyContext(acme, purpose, row.version))
+                    .shouldBeInstanceOf<Either.Left<KeyError.Denied>>()
+            }
+            keys.current(acme, KeyPurpose.Enc).shouldBeInstanceOf<Either.Left<KeyError.Invalid>>()
+            keys.current(globex, KeyPurpose.Enc).held().owner shouldBe globex
         }
 
         test("a KMS that cannot be reached leaves no key row behind") {

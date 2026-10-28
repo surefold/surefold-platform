@@ -9,6 +9,7 @@ import io.github.matthewjones372.surefold.tenancy.TenantTransactions
 import io.github.matthewjones372.surefold.tenancy.currentTenant
 import java.sql.Connection
 import java.time.ZoneOffset
+import kotlin.time.Duration
 
 /** An unwrapped data key: [material] is for this process only, and never stored or logged. */
 class DataKey(val owner: KeyOwner, val purpose: KeyPurpose, val version: Int, val material: ByteArray) {
@@ -77,6 +78,20 @@ class TenantKeys(
             throw Refused(KeyError.Invalid("$owner's ${purpose.label} v$version is active, or not there to retire"))
         }
         changed(it, owner)
+    }
+
+    /**
+     * Deletes every one of [owner]'s key rows and schedules each root they name for deletion after [waiting], in one
+     * transaction: a KMS that refuses leaves the rows. Once KMS deletes the root, every wrapped key in every copy of
+     * the database, backups included, is unreadable, and so is everything sealed under them.
+     */
+    fun shred(owner: KeyOwner, waiting: Duration): Either<KeyError, Unit> = writing(owner) { connection ->
+        val roots = connection.query("select distinct root from surefold_tenant_keys where tenant_id = ?", owner) {
+            RootKey(it.getString(1))
+        }
+        connection.update("delete from surefold_tenant_keys where tenant_id = ?", owner)
+        roots.forEach { kms.scheduleDeletion(it, waiting).held() }
+        changed(connection, owner)
     }
 
     /** Tells every process listening on [CHANNEL] that [owner]'s keys changed, once [connection] commits. */
