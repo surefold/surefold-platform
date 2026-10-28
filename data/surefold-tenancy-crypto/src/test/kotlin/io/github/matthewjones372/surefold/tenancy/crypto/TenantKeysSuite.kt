@@ -159,6 +159,42 @@ object TenantKeysSuite : Suite() {
             keys.current(globex, KeyPurpose.Enc).held().owner shouldBe globex
         }
 
+        test("mid-rotation, any(candidates) finds a row indexed under each version, and two tenants index apart") {
+            val held = Fixture()
+            held.database.execute(
+                "create table customers (tenant_id text not null default current_setting('app.tenant_id', true), " +
+                    "email_bidx bytea not null)",
+            )
+            held.database.grantTo("customers")
+            val index = BlindIndex(held.keys)
+            val email = Field("customers", "email")
+            fun stored(bidx: ByteArray) = held.tenants.transaction(TenantId("acme")) { connection ->
+                connection.prepareStatement("insert into customers (email_bidx) values (?)").use {
+                    it.setBytes(1, bidx)
+                    it.executeUpdate()
+                }
+            }
+            held.keys.provision(acme).held()
+            held.keys.provision(globex).held()
+            stored(index.of(acme, "jo@example.com", email).held())
+            held.keys.rotate(acme).held()
+            stored(index.of(acme, "jo@example.com", email).held())
+
+            val found = held.tenants.transaction(TenantId("acme")) { connection ->
+                connection.prepareStatement("select count(*) from customers where email_bidx = any(?)").use {
+                    val candidates = index.candidates(acme, "jo@example.com", email).held()
+                    it.setArray(1, connection.createArrayOf("bytea", candidates.toTypedArray()))
+                    it.executeQuery().use { rows ->
+                        rows.next()
+                        rows.getInt(1)
+                    }
+                }
+            }
+            found shouldBe 2
+            val theirs = index.of(globex, "jo@example.com", email).held().toList()
+            index.candidates(acme, "jo@example.com", email).held().none { it.toList() == theirs } shouldBe true
+        }
+
         test("a KMS that cannot be reached leaves no key row behind") {
             val database = RlsDatabase(bookings = false).apply {
                 apply("surefold/tenancy-crypto/postgres.sql")

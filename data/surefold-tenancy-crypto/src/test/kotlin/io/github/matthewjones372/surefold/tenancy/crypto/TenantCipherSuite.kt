@@ -6,7 +6,6 @@ import io.github.matthewjones372.surefold.junit.shouldBe
 import io.github.matthewjones372.surefold.junit.shouldBeInstanceOf
 import io.github.matthewjones372.surefold.tenancy.TenantId
 import io.github.matthewjones372.surefold.tenancy.withTenant
-import java.security.SecureRandom
 import javax.crypto.Cipher
 
 /** Values sealed under a tenant's key, bound to their place, and refused anywhere else (spec 0236). */
@@ -15,20 +14,6 @@ object TenantCipherSuite : Suite() {
     private val acme = KeyOwner.Tenant(TenantId("acme"))
     private val globex = KeyOwner.Tenant(TenantId("globex"))
     private val email = Place("customers", "email", "c-1")
-
-    /** Fixed keys, one per owner, purpose and version, as TenantKeys would answer them unwrapped. */
-    private class FixedRing(var active: Int = 1) : KeyRing {
-        private val keys = mutableMapOf<Triple<KeyOwner, KeyPurpose, Int>, ByteArray>()
-        val retired = mutableSetOf<Int>()
-
-        override fun current(owner: KeyOwner, purpose: KeyPurpose) = version(owner, purpose, active)
-
-        override fun version(owner: KeyOwner, purpose: KeyPurpose, version: Int): Either<KeyError, DataKey> {
-            if (version in retired) return Either.Left(KeyError.Invalid("v$version is retired"))
-            val bytes = keys.getOrPut(Triple(owner, purpose, version)) { ByteArray(32).also(SecureRandom()::nextBytes) }
-            return Either.Right(DataKey(owner, purpose, version, bytes.copyOf()))
-        }
-    }
 
     private fun hex(text: String): ByteArray = text.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
 

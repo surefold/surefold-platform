@@ -19,6 +19,9 @@ interface KeyRing {
 
     /** Version [version] of [owner]'s [purpose], active or not. */
     fun version(owner: KeyOwner, purpose: KeyPurpose, version: Int): Either<KeyError, DataKey>
+
+    /** Every version of [owner]'s [purpose] not yet retired, newest first. */
+    fun versions(owner: KeyOwner, purpose: KeyPurpose): Either<KeyError, List<Int>>
 }
 
 /** An unwrapped data key: [material] is for this process only, and never stored or logged. */
@@ -63,6 +66,14 @@ class TenantKeys(
     /** Version [version] of [owner]'s [purpose], active or not. */
     override fun version(owner: KeyOwner, purpose: KeyPurpose, version: Int): Either<KeyError, DataKey> =
         cache.get(KeyCache.Slot(owner, purpose, version)) { unwrapped(owner, purpose, "version = $version") }
+
+    override fun versions(owner: KeyOwner, purpose: KeyPurpose): Either<KeyError, List<Int>> = within(owner) {
+        it.query(
+            "select version from surefold_tenant_keys where tenant_id = ? and purpose = '${purpose.label}' " +
+                "order by version desc",
+            owner,
+        ) { rows -> rows.getInt(1) }
+    }.right()
 
     /** Evicts the owner a [CHANNEL] notification names: another process rotated, retired or shredded its keys. */
     fun evictNotified(payload: String) =
