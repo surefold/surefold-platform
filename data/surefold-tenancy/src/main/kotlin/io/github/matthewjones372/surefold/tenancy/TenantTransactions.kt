@@ -80,6 +80,10 @@ class TenantTransactions(
         }.right()
     }
 
+    /** [transaction] as [id]'s, binding it for [block] and every fork [block] opens. */
+    fun <A> transaction(id: TenantId, block: (Connection) -> A): A =
+        withTenant(id) { (transaction(block) as Either.Right).value }
+
     /** [transaction] as [id]'s, with [values], binding them for [block] and every fork [block] opens. */
     fun <A> transaction(id: TenantId, vararg values: Pair<String, String>, block: (Connection) -> A): A =
         withTenant(id, *values) { (transaction(block) as Either.Right).value }
