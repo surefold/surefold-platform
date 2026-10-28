@@ -6,8 +6,8 @@ a retry policy, and has an in-memory fake that keeps the same contract for unit 
 
 ```kotlin
 dependencies {
-    implementation("io.github.matthewjones372:surefold-files:0.14.0")
-    testImplementation("io.github.matthewjones372:surefold-files-test:0.14.0") // MinIO in Testcontainers
+    implementation("io.github.matthewjones372:surefold-files:0.15.0")
+    testImplementation("io.github.matthewjones372:surefold-files-test:0.15.0") // MinIO in Testcontainers
 }
 ```
 

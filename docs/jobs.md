@@ -11,9 +11,9 @@ idempotent: check whether its effect already happened, or make the effect safe t
 
 ```kotlin
 dependencies {
-    implementation("io.github.matthewjones372:surefold-jobs:0.14.0")
-    implementation("io.github.matthewjones372:surefold-app-jobs:0.14.0") // the worker as a graph node
-    implementation("io.github.matthewjones372:surefold-app-liquibase:0.14.0") // or any tool that provides Migrated
+    implementation("io.github.matthewjones372:surefold-jobs:0.15.0")
+    implementation("io.github.matthewjones372:surefold-app-jobs:0.15.0") // the worker as a graph node
+    implementation("io.github.matthewjones372:surefold-app-liquibase:0.15.0") // or any tool that provides Migrated
 }
 ```
 
