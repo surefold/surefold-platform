@@ -109,22 +109,23 @@ class TenantTransactions(
         }
     }
 
-    private fun <A> inTransaction(connection: Connection, block: () -> A): A {
-        val wasAuto = connection.autoCommit
-        connection.autoCommit = false
-        var committed = false
-        try {
-            return block().also {
-                connection.commit()
-                committed = true
-            }
-        } finally {
-            if (!committed) connection.rollback()
-            connection.autoCommit = wasAuto
-        }
-    }
-
     private companion object {
         const val AUDIT = "insert into surefold_tenancy_audit (actor, reason, at) values (?, ?, ?)"
+    }
+}
+
+/** Runs [block] in a transaction on [connection]: commits when it returns, rolls back when it throws. */
+internal fun <A> inTransaction(connection: Connection, block: () -> A): A {
+    val wasAuto = connection.autoCommit
+    connection.autoCommit = false
+    var committed = false
+    try {
+        return block().also {
+            connection.commit()
+            committed = true
+        }
+    } finally {
+        if (!committed) connection.rollback()
+        connection.autoCommit = wasAuto
     }
 }

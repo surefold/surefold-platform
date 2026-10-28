@@ -8,8 +8,9 @@ import java.sql.Connection
 import javax.sql.DataSource
 
 /**
- * A fresh database with the tenancy changelog applied, and three ways in: [owner], a superuser that row-level
- * security never binds; [app], a role it binds; and [system], a role with BYPASSRLS. With [bookings], it has a
+ * A fresh database with the tenancy changelog applied, and four ways in: [owner], a superuser that row-level
+ * security never binds; [app], a role it binds; [system], a role with BYPASSRLS; and [functions], a role with no table
+ * grants that may execute the audit function and what a test grants it. With [bookings], it has a
  * `bookings` table under a forced tenant policy, the one docs/tenancy.md gives to copy.
  */
 class RlsDatabase(bookings: Boolean = true) {
@@ -18,6 +19,7 @@ class RlsDatabase(bookings: Boolean = true) {
     val owner: DataSource = source(user = null)
     val app: DataSource = source("surefold_app")
     val system: DataSource = source("surefold_system")
+    val functions: DataSource = source("surefold_functions")
 
     init {
         check(rolesMade)
@@ -67,6 +69,9 @@ class RlsDatabase(bookings: Boolean = true) {
             do $$ begin
                 create role surefold_system login password 'surefold_system' bypassrls;
             exception when duplicate_object or unique_violation then null; end $$;
+            do $$ begin
+                create role surefold_functions login password 'surefold_functions';
+            exception when duplicate_object or unique_violation then null; end $$;
         """
 
         const val TABLE = """
@@ -85,6 +90,7 @@ class RlsDatabase(bookings: Boolean = true) {
         const val GRANTS = """
             grant insert on surefold_tenancy_audit to surefold_system;
             grant select on surefold_tenancy_audit to surefold_app, surefold_system;
+            grant execute on function surefold_tenancy_audit_write(text, text) to surefold_functions;
         """
     }
 }
