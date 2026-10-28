@@ -60,6 +60,9 @@ sealed interface KeyError {
 
     /** Not a key this root wrapped under this context: the bytes, the root or the context is wrong. */
     data class Invalid(val reason: String) : KeyError
+
+    /** No tenant was bound, so there is no one whose key to answer. */
+    data object NoTenant : KeyError
 }
 
 /** The calls a key per tenant needs of a KMS, each answering its failure as a value. */

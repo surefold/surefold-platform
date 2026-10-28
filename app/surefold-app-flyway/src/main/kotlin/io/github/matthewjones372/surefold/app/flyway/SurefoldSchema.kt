@@ -6,6 +6,7 @@ package io.github.matthewjones372.surefold.app.flyway
  */
 enum class SurefoldSchema(internal val module: String) {
     TENANCY("tenancy"),
+    TENANCY_CRYPTO("tenancy-crypto"),
     JOBS("jobs"),
     IDEMPOTENCY("idempotency"),
     RATELIMIT("ratelimit"),
