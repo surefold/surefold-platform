@@ -12,6 +12,10 @@ import dev.openfeature.sdk.Value
 import io.github.matthewjones372.surefold.cache.Cache
 import io.github.matthewjones372.surefold.cache.Invalidation
 import io.github.matthewjones372.surefold.fail.Either
+import io.github.matthewjones372.surefold.postgres.notify.Notice
+import io.github.matthewjones372.surefold.stream.Run
+import io.github.matthewjones372.surefold.stream.Stream
+import io.github.matthewjones372.surefold.stream.runFold
 import io.github.matthewjones372.surefold.tenancy.TenantId
 import io.github.matthewjones372.surefold.tenancy.TenantTransactions
 import io.github.matthewjones372.surefold.tenancy.currentTenant
@@ -26,6 +30,9 @@ import kotlin.time.Duration.Companion.seconds
 
 /** The evaluation context attribute a flag is read for before the bound tenant, so a tool can ask as any tenant. */
 const val TENANT_ATTRIBUTE = "tenant"
+
+/** The channel the table's trigger notifies on, with a row's tenant, or '' for a row every tenant gets. */
+const val FLAGS_CHANNEL = "surefold_feature_flags"
 
 /**
  * Flags per tenant from `surefold_feature_flags` (spec 0240), read on [app], the application's own `DataSource`,
@@ -105,9 +112,32 @@ class PostgresFlags(
         forget(tenant)
     }
 
+    /**
+     * Drops what this provider holds as the table's trigger reports each change, for as long as the run lasts, so a
+     * row changed by another process, or by hand, is seen before the ttl runs out. [notices] is
+     * `PostgresNotifications.listen(source, setOf(FLAGS_CHANNEL))`: a tenant's row drops that tenant's scope, and a
+     * row every tenant gets, or a [Notice.Gap], drops every scope. A notice on another channel, from a listener this
+     * shares, drops nothing. The run answers how many it applied.
+     */
+    fun listening(notices: Stream<Nothing, Notice>): Run<Nothing, Long> = notices.runFold(0L) { applied, notice ->
+        val dropped = dropping(notice) ?: return@runFold applied
+        scopes.invalidate(dropped)
+        applied + 1
+    }
+
+    private fun dropping(notice: Notice): Invalidation<Scope>? = when (notice) {
+        Notice.Gap -> Invalidation.All
+
+        is Notice.Received -> notice.takeIf { it.channel == FLAGS_CHANNEL }?.let {
+            ofTenant(it.payload.takeIf(String::isNotEmpty)?.let(::TenantId))
+        }
+    }
+
     // A null row is every scope's, so its change drops them all.
-    private fun forget(tenant: TenantId?) =
-        scopes.invalidate(if (tenant == null) Invalidation.All else Invalidation.Key(Scope(tenant.value)))
+    private fun forget(tenant: TenantId?) = scopes.invalidate(ofTenant(tenant))
+
+    private fun ofTenant(tenant: TenantId?): Invalidation<Scope> =
+        if (tenant == null) Invalidation.All else Invalidation.Key(Scope(tenant.value))
 
     override fun getBooleanEvaluation(key: String, defaultValue: Boolean, ctx: EvaluationContext) =
         evaluate(key, defaultValue, ctx, "a boolean", { it.toBooleanStrictOrNull() }) {
