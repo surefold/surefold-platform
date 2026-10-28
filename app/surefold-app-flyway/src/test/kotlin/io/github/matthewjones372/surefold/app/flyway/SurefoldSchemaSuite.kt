@@ -58,14 +58,16 @@ internal fun catalog(source: DataSource): List<String> =
 /** The data modules' two copies of their SQL (spec 0242): Flyway's scripts and Liquibase's changelogs agree. */
 object SurefoldSchemaSuite : Suite() {
     init {
-        SurefoldSchema.entries.forEach { schema ->
-            test("${schema.name.lowercase()}'s Flyway scripts leave the catalog its Liquibase changelog does") {
-                val liquibase = Postgres.empty().also { it.migrate("surefold/${schema.module}/postgres.sql") }
-                val flyway = Postgres.empty().also { migrate(it, schema) }
+        testEach(
+            "a module's Flyway scripts leave the catalog its Liquibase changelog does",
+            SurefoldSchema.entries,
+            named = { it.name.lowercase() },
+        ) { schema ->
+            val liquibase = Postgres.empty().also { it.migrate("surefold/${schema.module}/postgres.sql") }
+            val flyway = Postgres.empty().also { migrate(it, schema) }
 
-                withClue("the two copies of ${schema.module}'s SQL have drifted apart") {
-                    catalog(flyway) shouldBe catalog(liquibase)
-                }
+            withClue("the two copies of ${schema.module}'s SQL have drifted apart") {
+                catalog(flyway) shouldBe catalog(liquibase)
             }
         }
 
