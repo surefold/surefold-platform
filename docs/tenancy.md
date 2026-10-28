@@ -82,6 +82,29 @@ create role booking_system login password '…' bypassrls;        -- the system 
 grant insert on surefold_tenancy_audit to booking_system;
 ```
 
+## Who is acting, and as what
+
+A tenant is often not enough: a policy may also narrow by the member's role or the acting user. Declare each such
+setting once, with the value it takes when none is bound, and bind values beside the tenant:
+
+```kotlin
+val db = TenantTransactions(app = appDataSource, settings = listOf(Setting("app.member_role", absent = "none"),
+                                                                   Setting("app.user_id", absent = "")))
+withTenant(TenantId("acme"), "app.member_role" to "manager", "app.user_id" to user.id) {
+    db.transaction { connection -> … }
+}
+```
+
+```sql
+create policy managers_only on rotas as restrictive
+    using (current_setting('app.member_role') = 'manager');
+```
+
+Every tenant transaction sets each declared setting, transaction-locally, to its bound value or to `absent`, so a
+restrictive policy sees `none`, never a pooled connection's last value, and fails closed. Names are `word.word`. Forks
+see the values, as they see the tenant; a nested `withTenant` that binds none clears them; and they do not ride a
+`tell` or a job, which run as the tenant with every setting `absent`.
+
 ## Jobs
 
 With `surefold-jobs-tenancy` on the classpath, each job's handler runs as the tenant in its row's `tenant_id`,

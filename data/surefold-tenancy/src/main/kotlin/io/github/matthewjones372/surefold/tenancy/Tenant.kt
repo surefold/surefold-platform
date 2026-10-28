@@ -17,8 +17,21 @@ value class TenantId(val value: String) {
 /** The tenant the current work is for, or null. A fork inherits it, as it inherits the clock and the logger. */
 val tenant: SurefoldLocal<TenantId?> = surefoldLocal { null }
 
-/** Runs [block], and every fork it opens, as [id]'s. */
-fun <A> withTenant(id: TenantId, block: () -> A): A = tenant.locally(id, block)
+/** Runs [block], and every fork it opens, as [id]'s, with no values bound. */
+fun <A> withTenant(id: TenantId, block: () -> A): A = tenant.locally(id) { tenantValues.locally(emptyMap(), block) }
+
+/** The values bound beside the tenant, by setting name: who is acting for it, and as what (spec 0237). */
+internal val tenantValues: SurefoldLocal<Map<String, String>> = surefoldLocal { emptyMap() }
+
+/**
+ * Runs [block], and every fork it opens, as [id]'s, with [values] for the settings a [TenantTransactions] declares:
+ * `"app.member_role" to "manager"`. A setting given no value here is set to its `absent`, and so is every setting
+ * inside a nested `withTenant` that gives none: values never outlive the tenant they were bound with.
+ */
+fun <A> withTenant(id: TenantId, vararg values: Pair<String, String>, block: () -> A): A {
+    values.forEach { (name, _) -> Setting.checkName(name) }
+    return tenant.locally(id) { tenantValues.locally(values.toMap(), block) }
+}
 
 /** The tenant the current work is for, or null outside any [withTenant]. */
 fun currentTenant(): TenantId? = tenant.get()
