@@ -1,6 +1,7 @@
 package io.github.matthewjones372.surefold.idempotency
 
 // The example docs/http-stores.md shows, from the imports down: HttpStoresGuideSuite holds the page to this file.
+import io.github.matthewjones372.surefold.ByteChunk
 import io.github.matthewjones372.surefold.ratelimit.Decision
 import io.github.matthewjones372.surefold.ratelimit.RateLimits
 import io.github.matthewjones372.surefold.ratelimit.TokenBucket
@@ -25,7 +26,7 @@ class Payments(private val keys: IdempotencyStore, private val limits: RateLimit
                     keys.release(idempotency, reservation.token)
                     throw failed
                 }
-                keys.complete(idempotency, reservation.token, StoredResponse(201, emptyList(), receipt.toByteArray()))
+                keys.complete(idempotency, reservation.token, StoredResponse(201, emptyList(), ByteChunk.from(receipt)))
                 Answer(201, receipt)
             }
 

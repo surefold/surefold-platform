@@ -1,5 +1,6 @@
 package io.github.matthewjones372.surefold.idempotency
 
+import io.github.matthewjones372.surefold.ByteChunk
 import io.github.matthewjones372.surefold.TestClock
 import io.github.matthewjones372.surefold.actor.journal.jdbc.Postgres
 import io.github.matthewjones372.surefold.actor.journal.jdbc.migrate
@@ -22,7 +23,7 @@ import kotlin.time.Duration.Companion.seconds
 
 /** Expired keys deleted by a surefold-jobs worker, and live ones kept (spec 0226). */
 object PruneSuite : Suite() {
-    private val response = StoredResponse(200, emptyList(), byteArrayOf())
+    private val response = StoredResponse(200, emptyList(), ByteChunk.empty())
 
     init {
         test("a prune deletes expired keys, and keeps live ones and one still running on a live lease") {

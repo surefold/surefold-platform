@@ -1,5 +1,6 @@
 package io.github.matthewjones372.surefold.idempotency
 
+import io.github.matthewjones372.surefold.ByteChunk
 import io.github.matthewjones372.surefold.clock
 import java.sql.Connection
 import java.sql.PreparedStatement
@@ -59,7 +60,7 @@ class PostgresIdempotency(private val source: DataSource, private val lease: Dur
                     response.status,
                     connection.createArrayOf("text", response.headers.map { it.first }.toTypedArray()),
                     connection.createArrayOf("text", response.headers.map { it.second }.toTypedArray()),
-                    response.body,
+                    response.body.toByteArray(),
                     key.scope,
                     key.key,
                     token,
@@ -90,7 +91,7 @@ class PostgresIdempotency(private val source: DataSource, private val lease: Dur
         return StoredResponse(
             getInt("response_status"),
             names.zip(values) { name, value -> "$name" to "$value" },
-            getBytes("body"),
+            ByteChunk.from(getBytes("body")),
         )
     }
 
