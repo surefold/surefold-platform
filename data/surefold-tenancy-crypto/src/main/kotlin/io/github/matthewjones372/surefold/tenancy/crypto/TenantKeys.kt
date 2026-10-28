@@ -11,6 +11,16 @@ import java.sql.Connection
 import java.time.ZoneOffset
 import kotlin.time.Duration
 
+/** Where sealing and blind indexes get an owner's keys: [TenantKeys], or a ring of fixed keys in a test. */
+interface KeyRing {
+
+    /** The active key of [purpose] for [owner]. */
+    fun current(owner: KeyOwner, purpose: KeyPurpose): Either<KeyError, DataKey>
+
+    /** Version [version] of [owner]'s [purpose], active or not. */
+    fun version(owner: KeyOwner, purpose: KeyPurpose, version: Int): Either<KeyError, DataKey>
+}
+
 /** An unwrapped data key: [material] is for this process only, and never stored or logged. */
 class DataKey(val owner: KeyOwner, val purpose: KeyPurpose, val version: Int, val material: ByteArray) {
 
@@ -28,7 +38,7 @@ class TenantKeys(
     private val tenants: TenantTransactions,
     private val kms: Kms,
     private val cache: KeyCache = KeyCache(),
-) {
+) : KeyRing {
 
     /** A root key for [owner] and version 1 of each purpose; nothing, for an owner already provisioned. */
     fun provision(owner: KeyOwner): Either<KeyError, Unit> = writing(owner) { connection ->
@@ -43,7 +53,7 @@ class TenantKeys(
         bound()?.let { current(it, purpose) } ?: KeyError.NoTenant.left()
 
     /** The active key of [purpose] for [owner], which new values are sealed under. */
-    fun current(owner: KeyOwner, purpose: KeyPurpose): Either<KeyError, DataKey> =
+    override fun current(owner: KeyOwner, purpose: KeyPurpose): Either<KeyError, DataKey> =
         cache.get(KeyCache.Slot(owner, purpose, null)) { unwrapped(owner, purpose, "state = 'active'") }
 
     /** Version [version] of the bound tenant's [purpose], to open or look up what it wrote. */
@@ -51,7 +61,7 @@ class TenantKeys(
         bound()?.let { version(it, purpose, version) } ?: KeyError.NoTenant.left()
 
     /** Version [version] of [owner]'s [purpose], active or not. */
-    fun version(owner: KeyOwner, purpose: KeyPurpose, version: Int): Either<KeyError, DataKey> =
+    override fun version(owner: KeyOwner, purpose: KeyPurpose, version: Int): Either<KeyError, DataKey> =
         cache.get(KeyCache.Slot(owner, purpose, version)) { unwrapped(owner, purpose, "version = $version") }
 
     /** Evicts the owner a [CHANNEL] notification names: another process rotated, retired or shredded its keys. */
