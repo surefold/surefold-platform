@@ -15,7 +15,7 @@ object TenantKeysSuite : Suite() {
     private val acme = KeyOwner.Tenant(TenantId("acme"))
     private val globex = KeyOwner.Tenant(TenantId("globex"))
 
-    private class Keys {
+    private class Fixture {
         val database = RlsDatabase(bookings = false).apply {
             apply("surefold/tenancy-crypto/postgres.sql")
             grantTo("surefold_tenant_keys")
@@ -30,7 +30,7 @@ object TenantKeysSuite : Suite() {
 
     init {
         test("rotation makes version 2 current, and version 1 still opens what it wrote") {
-            val keys = Keys().keys
+            val keys = Fixture().keys
             keys.provision(acme).held()
             val first = keys.current(acme, KeyPurpose.Enc).held()
 
@@ -44,7 +44,7 @@ object TenantKeysSuite : Suite() {
         }
 
         test("tenant A's transaction reads none of B's key rows") {
-            val held = Keys()
+            val held = Fixture()
             held.keys.provision(acme).held()
             held.keys.provision(globex).held()
 
@@ -59,7 +59,7 @@ object TenantKeysSuite : Suite() {
         }
 
         test("the bound tenant's key is the one answered, and none is answered with no tenant bound") {
-            val keys = Keys().keys
+            val keys = Fixture().keys
             keys.provision(acme).held()
 
             withTenant(TenantId("acme")) { keys.current(KeyPurpose.Enc).held().owner } shouldBe acme
@@ -67,7 +67,7 @@ object TenantKeysSuite : Suite() {
         }
 
         test("a second provision changes nothing, and an owner not provisioned has nothing to rotate") {
-            val keys = Keys().keys
+            val keys = Fixture().keys
             keys.provision(acme).held()
             val first = keys.current(acme, KeyPurpose.Enc).held()
 
@@ -78,7 +78,7 @@ object TenantKeysSuite : Suite() {
         }
 
         test("a retired version is gone, and the active one cannot be retired") {
-            val keys = Keys().keys
+            val keys = Fixture().keys
             keys.provision(acme).held()
             keys.rotate(acme).held()
 
@@ -90,7 +90,7 @@ object TenantKeysSuite : Suite() {
         }
 
         test("the platform's keys are kept beside the tenants', and out of every tenant's transaction") {
-            val held = Keys()
+            val held = Fixture()
             held.keys.provision(KeyOwner.Platform).held()
 
             held.keys.current(KeyOwner.Platform, KeyPurpose.Enc).held().owner shouldBe KeyOwner.Platform
