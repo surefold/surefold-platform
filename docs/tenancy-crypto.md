@@ -29,7 +29,9 @@ Every call answers `Either<KeyError, _>`: `Unavailable` when the KMS cannot be r
 deleted root, a policy), `Invalid` when the key, root or context is wrong, and `NoTenant` when none is bound.
 
 `KeyOwner.Platform` owns the keys of data that belongs to no tenant, such as the service's own staff. Its rows carry
-`tenant_id = ''`, which no `TenantId` can be, and are read in an audited system transaction.
+`tenant_id = ''`, which no `TenantId` can be, and are read in an audited system transaction. The policy never
+matches `''`: a pooled connection that a tenant transaction has used reads `app.tenant_id` as `''` once it ends, so
+without that test any query on it outside `TenantTransactions` would see the platform's rows.
 
 ## Sealing values
 

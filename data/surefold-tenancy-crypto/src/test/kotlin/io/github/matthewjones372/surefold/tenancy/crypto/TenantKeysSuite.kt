@@ -5,6 +5,7 @@ import io.github.matthewjones372.surefold.junit.Suite
 import io.github.matthewjones372.surefold.junit.shouldBe
 import io.github.matthewjones372.surefold.junit.shouldBeInstanceOf
 import io.github.matthewjones372.surefold.tenancy.RlsDatabase
+import io.github.matthewjones372.surefold.tenancy.SingleConnection
 import io.github.matthewjones372.surefold.tenancy.TenantId
 import io.github.matthewjones372.surefold.tenancy.TenantTransactions
 import io.github.matthewjones372.surefold.tenancy.withTenant
@@ -118,6 +119,21 @@ object TenantKeysSuite : Suite() {
                     }
                 }
             } shouldBe 0
+        }
+
+        test("a pooled connection a tenant transaction has used reads none of the platform's keys") {
+            val held = Fixture()
+            held.keys.provision(KeyOwner.Platform).held()
+            held.database.app.connection.use { connection ->
+                TenantTransactions(SingleConnection(connection)).transaction(TenantId("acme")) { }
+                connection.createStatement().use { statement ->
+                    statement.executeQuery("select current_setting('app.tenant_id', true)").use { rows ->
+                        rows.next()
+                        rows.getString(1)
+                    }
+                } shouldBe ""
+                copied(connection).size shouldBe 0
+            }
         }
 
         test("a rotation is current at once here, and notifies every other process once it commits") {
