@@ -11,6 +11,7 @@ enum class SurefoldSchema(internal val module: String) {
     IDEMPOTENCY("idempotency"),
     RATELIMIT("ratelimit"),
     AUTH("auth"),
+    OPENFEATURE_POSTGRES("openfeature-postgres"),
     ;
 
     internal val location: String get() = "classpath:surefold/$module/flyway"

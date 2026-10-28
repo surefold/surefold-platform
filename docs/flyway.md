@@ -29,8 +29,8 @@ val database: Module =
 - **The data modules** ship their tables as Flyway scripts, `surefold/<name>/flyway/V<n>__<changeset>.sql`, one per
   changeset of their Liquibase changelog. Each keeps its own history table, `flyway_surefold_<name>`, so a module's
   versions never meet the service's: a service on `V40` takes jobs' next script without `outOfOrder`.
-- **The order** is `SurefoldSchema`'s, whatever the arguments' order: tenancy, jobs, idempotency, ratelimit, auth, then
-  the service's scripts at `service`, with Flyway's own `flyway_schema_history`.
+- **The order** is `SurefoldSchema`'s, whatever the arguments' order: tenancy, jobs, idempotency, ratelimit, auth,
+  openfeature-postgres, then the service's scripts at `service`, with Flyway's own `flyway_schema_history`.
 - **Outside a graph**, `migrate(source, SurefoldSchema.JOBS, service = "classpath:db/migration")` runs the same now and
   answers how many scripts it applied.
 - **As the schema's owner**, pass `connect = { s: DbSettings -> ownerPool(s) }`: the scripts run on that source, which

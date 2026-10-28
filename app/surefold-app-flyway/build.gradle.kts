@@ -17,6 +17,7 @@ dependencies {
     testImplementation(project(":surefold-idempotency"))
     testImplementation(project(":surefold-ratelimit"))
     testImplementation(project(":surefold-auth"))
+    testImplementation(project(":surefold-openfeature-postgres"))
 }
 
 tasks.test {
