@@ -3,6 +3,8 @@ package io.github.matthewjones372.surefold.openfeature.postgres
 import dev.openfeature.sdk.ErrorCode
 import dev.openfeature.sdk.EvaluationContext
 import dev.openfeature.sdk.ImmutableContext
+import dev.openfeature.sdk.OpenFeatureAPI
+import dev.openfeature.sdk.ProviderState
 import dev.openfeature.sdk.Reason
 import dev.openfeature.sdk.Value
 import dev.openfeature.sdk.exceptions.FlagNotFoundError
@@ -78,6 +80,13 @@ object PostgresFlagsSuite : Suite() {
             flags.initialize(nobody)
             flags.shutdown()
             fallen.calls shouldBe listOf("initialize", "shutdown")
+        }
+
+        test("the SDK starts it, as it does every provider, with no evaluation context") {
+            val api = OpenFeatureAPI.getInstance()
+            api.setProviderAndWait("postgres-flags-start", PostgresFlags(PGSimpleDataSource()))
+            api.getClient("postgres-flags-start").providerState shouldBe ProviderState.READY
+            api.shutdown()
         }
 
         test("a row of another tenant is never read") {

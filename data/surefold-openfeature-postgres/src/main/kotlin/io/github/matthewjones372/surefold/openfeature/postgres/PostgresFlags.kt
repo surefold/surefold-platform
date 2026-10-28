@@ -2,18 +2,27 @@ package io.github.matthewjones372.surefold.openfeature.postgres
 
 import dev.openfeature.sdk.ErrorCode
 import dev.openfeature.sdk.EvaluationContext
+import dev.openfeature.sdk.EventProvider
 import dev.openfeature.sdk.FeatureProvider
 import dev.openfeature.sdk.Metadata
 import dev.openfeature.sdk.ProviderEvaluation
+import dev.openfeature.sdk.ProviderEventDetails
 import dev.openfeature.sdk.Reason
 import dev.openfeature.sdk.Value
+import io.github.matthewjones372.surefold.cache.Cache
+import io.github.matthewjones372.surefold.cache.Invalidation
 import io.github.matthewjones372.surefold.fail.Either
 import io.github.matthewjones372.surefold.tenancy.TenantId
 import io.github.matthewjones372.surefold.tenancy.TenantTransactions
 import io.github.matthewjones372.surefold.tenancy.currentTenant
 import io.github.matthewjones372.surefold.tenancy.withTenant
 import java.sql.Connection
+import java.sql.SQLException
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import javax.sql.DataSource
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 
 /** The evaluation context attribute a flag is read for before the bound tenant, so a tool can ask as any tenant. */
 const val TENANT_ATTRIBUTE = "tenant"
@@ -29,23 +38,76 @@ const val TENANT_ATTRIBUTE = "tenant"
  * The tenant is the context's [TENANT_ATTRIBUTE] if set, else the bound one; with neither, only null rows answer. A
  * row's text is read as the type asked for, and one that does not parse answers the default with `PARSE_ERROR`.
  * There are no object flags: an object is [fallback]'s, or the default. [fallback] starts and stops with this provider.
+ *
+ * A scope's rows, a tenant's or none's, are read once per [ttl] on 0246's `Cache`, on the clock bound here, however
+ * many evaluate at once. While the table cannot be read, the last rows read answer for up to [stale] and the provider
+ * reports `STALE`; past that, or with nothing read yet, flags answer as if there were no rows and it reports `ERROR`.
  */
 class PostgresFlags(
     private val app: DataSource,
     private val fallback: FeatureProvider? = null,
-) : FeatureProvider {
+    ttl: Duration = 30.seconds,
+    stale: Duration = Duration.ZERO,
+) : EventProvider() {
     private val tenants = TenantTransactions(app)
+
+    // Whether the last read reached the table, and what the provider last told the SDK it was.
+    private val reached = AtomicBoolean(true)
+    private val told = AtomicReference(Told.READY)
+
+    private val scopes = Cache<Scope, SQLException, Map<String, Row>>(
+        ttl = { read -> if (read is Either.Right) ttl else minOf(ttl, FAILED_FOR) },
+        stale = stale,
+    ) { scope ->
+        try {
+            Either.Right(rows(scope.tenant?.let(::TenantId))).also { reached.set(true) }
+        } catch (failed: SQLException) {
+            reached.set(false)
+            Either.Left(failed)
+        }
+    }
 
     override fun getMetadata() = Metadata { "surefold-postgres" }
 
     // The SDK starts and stops only the provider it was given, so the fallback is started and stopped with this one.
-    override fun initialize(evaluationContext: EvaluationContext) {
+    // It starts a provider with no context at all when none was set, so the context is nullable here.
+    override fun initialize(evaluationContext: EvaluationContext?) {
         fallback?.initialize(evaluationContext)
     }
 
     override fun shutdown() {
+        scopes.close()
         fallback?.shutdown()
+        super.shutdown()
     }
+
+    /**
+     * Sets [key] to [value] for [tenant], or for every tenant with none, on [connection], whose role may write the
+     * table, and drops what this provider holds for it at once. Another process sees it after its own `ttl`. In
+     * autocommit the row is written when this returns; in the caller's transaction, call it once that has committed.
+     */
+    fun set(connection: Connection, key: String, tenant: TenantId?, value: String, reason: String, by: String) {
+        connection.prepareStatement(UPSERT).use { statement ->
+            val values = listOf(key, tenant?.value, value, reason, by)
+            values.forEachIndexed { at, text -> statement.setString(at + 1, text) }
+            statement.executeUpdate()
+        }
+        forget(tenant)
+    }
+
+    /** Removes [tenant]'s row for [key], or the row every tenant gets with none, as [set] writes one. */
+    fun clear(connection: Connection, key: String, tenant: TenantId?) {
+        connection.prepareStatement(DELETE).use { statement ->
+            statement.setString(1, key)
+            statement.setString(2, tenant?.value)
+            statement.executeUpdate()
+        }
+        forget(tenant)
+    }
+
+    // A null row is every scope's, so its change drops them all.
+    private fun forget(tenant: TenantId?) =
+        scopes.invalidate(if (tenant == null) Invalidation.All else Invalidation.Key(Scope(tenant.value)))
 
     override fun getBooleanEvaluation(key: String, defaultValue: Boolean, ctx: EvaluationContext) =
         evaluate(key, defaultValue, ctx, "a boolean", { it.toBooleanStrictOrNull() }) {
@@ -76,7 +138,7 @@ class PostgresFlags(
         parse: (String) -> A?,
         fallen: () -> ProviderEvaluation<A>?,
     ): ProviderEvaluation<A> {
-        val row = rows(scopeOf(ctx))[key] ?: return fallen() ?: answer(default, Reason.DEFAULT)
+        val row = read(Scope(scopeOf(ctx)?.value))[key] ?: return fallen() ?: answer(default, Reason.DEFAULT)
         val parsed = parse(row.value) ?: return ProviderEvaluation.builder<A>()
             .value(default)
             .reason(Reason.ERROR.name)
@@ -88,6 +150,25 @@ class PostgresFlags(
 
     private fun scopeOf(ctx: EvaluationContext): TenantId? =
         ctx.getValue(TENANT_ATTRIBUTE)?.asString()?.takeIf { it.isNotBlank() }?.let(::TenantId) ?: currentTenant()
+
+    // The scope's rows from the cache, telling the SDK when that answer moved between fresh, stale and none.
+    private fun read(scope: Scope): Map<String, Row> {
+        val answered = scopes.get(scope)
+        val now = when {
+            answered is Either.Left -> Told.ERROR
+            reached.get() -> Told.READY
+            else -> Told.STALE
+        }
+        if (told.getAndSet(now) != now) {
+            val details = ProviderEventDetails.builder().message("the feature flags table: $now").build()
+            when (now) {
+                Told.READY -> emitProviderReady(details)
+                Told.STALE -> emitProviderStale(details)
+                Told.ERROR -> emitProviderError(details)
+            }
+        }
+        return (answered as? Either.Right)?.value.orEmpty()
+    }
 
     // The tenant's rows and the null rows in one query, each key's own row before the null one.
     private fun rows(tenant: TenantId?): Map<String, Row> {
@@ -109,7 +190,7 @@ class PostgresFlags(
         try {
             connection.prepareStatement("select set_config('app.tenant_id', '', true)").use { it.execute() }
             select(connection).also { connection.commit() }
-        } catch (failed: java.sql.SQLException) {
+        } catch (failed: SQLException) {
             connection.rollback()
             throw failed
         } finally {
@@ -128,12 +209,29 @@ class PostgresFlags(
 
     private class Row(val key: String, val value: String, val tenants: Boolean)
 
+    // Whose rows: a tenant's and the null ones, or the null ones alone.
+    private data class Scope(val tenant: String?)
+
+    private enum class Told { READY, STALE, ERROR }
+
     private companion object {
         // The policy decides what a tenant sees; the condition keeps the same answer on a role it does not bind.
         const val SELECT = """
             select key, value, tenant_id is not null as tenants from surefold_feature_flags
             where tenant_id is null or tenant_id = current_setting('app.tenant_id', true)
         """
+
+        // How long a failed read is kept before the table is tried again, at most the ttl.
+        val FAILED_FOR = 1.seconds
+
+        const val UPSERT = """
+            insert into surefold_feature_flags (key, tenant_id, value, reason, updated_by, updated_at)
+            values (?, ?, ?, ?, ?, now())
+            on conflict (key, (coalesce(tenant_id, ''))) do update
+            set value = excluded.value, reason = excluded.reason, updated_by = excluded.updated_by, updated_at = now()
+        """
+
+        const val DELETE = "delete from surefold_feature_flags where key = ? and tenant_id is not distinct from ?"
 
         fun <A> answer(value: A, reason: Reason): ProviderEvaluation<A> =
             ProviderEvaluation.builder<A>().value(value).reason(reason.name).build()
