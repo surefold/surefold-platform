@@ -17,6 +17,7 @@ HTTP framework: a framework built on Surefold, such as Pelican, puts its own int
 
 <!-- http-stores -->
 ```kotlin
+import io.github.matthewjones372.surefold.ByteChunk
 import io.github.matthewjones372.surefold.ratelimit.Decision
 import io.github.matthewjones372.surefold.ratelimit.RateLimits
 import io.github.matthewjones372.surefold.ratelimit.TokenBucket
@@ -41,7 +42,7 @@ class Payments(private val keys: IdempotencyStore, private val limits: RateLimit
                     keys.release(idempotency, reservation.token)
                     throw failed
                 }
-                keys.complete(idempotency, reservation.token, StoredResponse(201, emptyList(), receipt.toByteArray()))
+                keys.complete(idempotency, reservation.token, StoredResponse(201, emptyList(), ByteChunk.from(receipt)))
                 Answer(201, receipt)
             }
 

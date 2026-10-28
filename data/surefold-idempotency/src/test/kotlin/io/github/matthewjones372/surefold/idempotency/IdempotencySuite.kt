@@ -1,5 +1,6 @@
 package io.github.matthewjones372.surefold.idempotency
 
+import io.github.matthewjones372.surefold.ByteChunk
 import io.github.matthewjones372.surefold.TestClock
 import io.github.matthewjones372.surefold.actor.journal.jdbc.Postgres
 import io.github.matthewjones372.surefold.actor.journal.jdbc.migrate
@@ -20,7 +21,7 @@ object IdempotencySuite : Suite() {
     private val noon = Instant.parse("2026-10-26T12:00:00Z")
     private val key = IdempotencyKey("acme", "pay-42")
     private val created =
-        StoredResponse(201, listOf("location" to "/payments/42", "x-trace" to "t"), "{\"id\":42}".toByteArray())
+        StoredResponse(201, listOf("location" to "/payments/42", "x-trace" to "t"), ByteChunk.from("{\"id\":42}"))
 
     init {
         test("fifty threads reserving one key at once get exactly one reservation, and the rest see it in progress") {
@@ -98,8 +99,16 @@ object IdempotencySuite : Suite() {
             shouldThrow<IllegalArgumentException> { IdempotencyKey("s", "k".repeat(256)) }
             PostgresIdempotency(database()).complete(key, UUID.randomUUID(), created) shouldBe false
             created.toString() shouldBe "StoredResponse(201, [(location, /payments/42), (x-trace, t)], 9 bytes)"
-            (created == StoredResponse(201, created.headers, created.body.copyOf())) shouldBe true
-            created.hashCode() shouldBe StoredResponse(201, created.headers, created.body.copyOf()).hashCode()
+            val copied = ByteChunk.from(created.body.toByteArray())
+            (created == StoredResponse(201, created.headers, copied)) shouldBe true
+            created.hashCode() shouldBe StoredResponse(201, created.headers, copied).hashCode()
+        }
+
+        test("a body made from an array keeps what the array held then, however the array changes after") {
+            val array = "{\"id\":42}".toByteArray()
+            val stored = StoredResponse(201, emptyList(), ByteChunk.from(array))
+            array.fill(0)
+            stored.body.decodeToString() shouldBe "{\"id\":42}"
         }
     }
 

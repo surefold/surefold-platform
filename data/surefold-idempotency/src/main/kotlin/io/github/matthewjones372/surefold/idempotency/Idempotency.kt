@@ -1,5 +1,6 @@
 package io.github.matthewjones372.surefold.idempotency
 
+import io.github.matthewjones372.surefold.ByteChunk
 import java.util.UUID
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.hours
@@ -17,12 +18,7 @@ data class IdempotencyKey(val scope: String, val key: String) {
 }
 
 /** A response kept to answer a repeat of its request with: status, headers in order, and body. */
-class StoredResponse(val status: Int, val headers: List<Pair<String, String>>, val body: ByteArray) {
-    override fun equals(other: Any?): Boolean =
-        other is StoredResponse && status == other.status && headers == other.headers && body.contentEquals(other.body)
-
-    override fun hashCode(): Int = (status * 31 + headers.hashCode()) * 31 + body.contentHashCode()
-
+data class StoredResponse(val status: Int, val headers: List<Pair<String, String>>, val body: ByteChunk) {
     override fun toString(): String = "StoredResponse($status, $headers, ${body.size} bytes)"
 }
 
