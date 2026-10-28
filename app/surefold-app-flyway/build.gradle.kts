@@ -12,6 +12,7 @@ dependencies {
     testImplementation(project(":surefold-assert"))
     // The data modules whose Flyway scripts SurefoldSchemaSuite holds equal to their Liquibase changelogs.
     testImplementation(project(":surefold-tenancy"))
+    testImplementation(project(":surefold-tenancy-crypto"))
     testImplementation(project(":surefold-jobs"))
     testImplementation(project(":surefold-idempotency"))
     testImplementation(project(":surefold-ratelimit"))

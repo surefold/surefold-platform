@@ -3,6 +3,9 @@
 
 dependencies {
     api(project(":surefold-tenancy"))
+
+    // A real Postgres with roles row-level security binds, one it does not, and one that bypasses it.
+    testImplementation(testFixtures(project(":surefold-tenancy")))
 }
 
 tasks.test {
