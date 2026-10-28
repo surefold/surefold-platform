@@ -1,12 +1,11 @@
 package io.github.matthewjones372.surefold.tenancy.crypto
 
+import io.github.matthewjones372.surefold.SingleFlight
 import io.github.matthewjones372.surefold.clock
 import io.github.matthewjones372.surefold.fail.Either
 import io.github.matthewjones372.surefold.fail.right
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.locks.ReentrantLock
-import kotlin.concurrent.withLock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.toJavaDuration
@@ -14,8 +13,9 @@ import kotlin.time.toJavaDuration
 /**
  * Unwrapped data keys in process memory, so a request does not wait on the KMS. A key is unwrapped again once it is
  * [soft] old; while the KMS is unavailable it is still used until it is [hard] old, and never after. Past [tenants]
- * owners, the least recently used owner's keys go. However many threads ask for one key, one unwraps it. A key that
- * goes is zeroed; each caller is answered a copy of its own, so a key evicted under a caller is never zeroed under it.
+ * owners, the least recently used owner's keys go. However many threads ask for one key, one unwraps it, through
+ * `SingleFlight`. A key that goes is zeroed; each caller is answered a copy of its own, so a key evicted under a caller
+ * is never zeroed under it.
  */
 class KeyCache(
     val soft: Duration = 15.minutes,
@@ -33,26 +33,35 @@ class KeyCache(
     private class Held(val key: DataKey, val at: Instant)
 
     private val held = ConcurrentHashMap<Slot, Held>()
-    private val loading = ConcurrentHashMap<Slot, ReentrantLock>()
+    private val flights = SingleFlight<Slot, KeyError, DataKey>("surefold.tenancy.crypto.keys")
     private val recent = LinkedHashMap<KeyOwner, Unit>(16, 0.75f, true)
 
     /** The key in [slot], unwrapped by [load] when it is missing or [soft] old. */
     internal fun get(slot: Slot, load: () -> Either<KeyError, DataKey>): Either<KeyError, DataKey> {
         touched(slot.owner)?.let(::evict)
-        return loading.computeIfAbsent(slot) { ReentrantLock() }.withLock {
-            val now = clock.get().now()
-            val cached = held[slot]
-            if (cached != null && now < cached.at + soft) return cached.key.copy().right()
-            when (val loaded = load()) {
-                is Either.Right -> loaded.value.copy().right().also { held[slot] = Held(loaded.value, now) }
+        val cached = held[slot]
+        if (cached != null && clock.get().now() < cached.at + soft) return cached.key.copy().right()
+        // The flight answers a copy no slot holds, so an eviction cannot zero it before each caller takes its own.
+        return when (val shared = flights.run(slot) { unwrapped(slot, load) }) {
+            is Either.Right -> shared.value.copy().right()
+            is Either.Left -> shared
+        }
+    }
 
-                is Either.Left ->
-                    if (cached != null && loaded.value is KeyError.Unavailable && now < cached.at + hard) {
-                        cached.key.copy().right()
-                    } else {
-                        loaded.also { if (cached != null) drop(slot) }
-                    }
-            }
+    // Under the flight for [slot]: the key again if another caller's flight refreshed it meanwhile, else [load]'s.
+    private fun unwrapped(slot: Slot, load: () -> Either<KeyError, DataKey>): Either<KeyError, DataKey> {
+        val now = clock.get().now()
+        val cached = held[slot]
+        if (cached != null && now < cached.at + soft) return cached.key.copy().right()
+        return when (val loaded = load()) {
+            is Either.Right -> loaded.value.copy().right().also { held[slot] = Held(loaded.value, now) }
+
+            is Either.Left ->
+                if (cached != null && loaded.value is KeyError.Unavailable && now < cached.at + hard) {
+                    cached.key.copy().right()
+                } else {
+                    loaded.also { if (cached != null) drop(slot) }
+                }
         }
     }
 
