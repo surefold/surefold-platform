@@ -1,13 +1,11 @@
 package io.github.matthewjones372.surefold.bank
 
 import com.sun.net.httpserver.HttpHandler
+import io.github.matthewjones372.surefold.Shared
 import io.github.matthewjones372.surefold.logDebug
+import io.github.matthewjones372.surefold.timeoutOrNull
 import java.io.IOException
 import java.io.OutputStream
-import java.util.concurrent.CopyOnWriteArraySet
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.locks.ReentrantLock
-import kotlin.concurrent.withLock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.nanoseconds
 import kotlin.time.Duration.Companion.seconds
@@ -41,48 +39,58 @@ internal data class Streaming(
  * new event is lost, and a queue that stays full for `fullFor` closes the stream.
  */
 internal class Stream(private val streaming: Streaming, private val now: () -> Long = System::nanoTime) {
-    private val lock = ReentrantLock()
-    private val arrived = lock.newCondition()
-    private val queue = ArrayDeque<Event>()
-    private var fullSince: Long? = null
-    private var out: OutputStream? = null
+    // Everything the dashboard and the writer share, changed only as a whole, so neither sees the other half done.
+    private data class Held(
+        val queue: List<Event> = emptyList(),
+        val fullSince: Long? = null,
+        val open: Boolean = true,
+        val out: OutputStream? = null,
+    )
 
-    @Volatile
-    var open: Boolean = true
-        private set
+    private val held = Shared(Held(), name = "bank.stream")
+
+    val open: Boolean get() = held.peek().open
 
     /** Queues [event], or makes room for it; false once the stream is closed. */
-    fun offer(event: Event): Boolean = lock.withLock {
-        if (!open) return false
-        val stale = queue.indexOfFirst { it.type == STATS }
-        when {
-            queue.size < streaming.capacity -> fullSince = null
-            stale >= 0 -> queue.removeAt(stale)
-            else -> return full()
+    fun offer(event: Event): Boolean {
+        val at = now()
+        val (accepted, closing) = held.modify { was ->
+            val stale = was.queue.indexOfFirst { it.type == STATS }
+            when {
+                !was.open -> was to (false to null)
+
+                was.queue.size < streaming.capacity -> was.copy(queue = was.queue + event, fullSince = null) to
+                    (true to null)
+
+                stale >= 0 -> was.copy(queue = was.queue.filterIndexed { i, _ -> i != stale } + event) to (true to null)
+
+                else -> full(was, at)
+            }
         }
-        queue.addLast(event)
-        arrived.signal()
-        true
+        closing?.let(::closeLater)
+        return accepted
     }
 
-    private fun full(): Boolean {
-        val since = fullSince ?: now().also { fullSince = it }
-        if ((now() - since).nanoseconds >= streaming.fullFor) close()
-        return open
+    // A full queue with nothing to drop: the event is lost, and a queue full for `fullFor` closes the stream.
+    private fun full(was: Held, at: Long): Pair<Held, Pair<Boolean, OutputStream?>> {
+        val since = was.fullSince ?: at
+        return if ((at - since).nanoseconds >= streaming.fullFor) {
+            was.copy(open = false, fullSince = since) to (false to was.out)
+        } else {
+            was.copy(fullSince = since) to (true to null)
+        }
     }
 
     /** The events waiting now, oldest first, and none left behind. */
-    fun drain(): List<Event> = lock.withLock { queue.toList().also { queue.clear() } }
+    fun drain(): List<Event> = held.modify { was -> was.copy(queue = emptyList()) to was.queue }
 
     /** Writes events to [to] as they arrive, or a heartbeat when idle, until closed or a write fails. */
     fun write(to: OutputStream) {
-        lock.withLock { out = to }
+        held.update { it.copy(out = to) }
         try {
             while (open) {
-                val next = lock.withLock {
-                    if (queue.isEmpty()) arrived.await(streaming.heartbeat.inWholeNanoseconds, TimeUnit.NANOSECONDS)
-                    queue.removeFirstOrNull()
-                }
+                timeoutOrNull(streaming.heartbeat) { held.awaitUntil { it.queue.isNotEmpty() || !it.open } }
+                val next = held.modify { was -> was.copy(queue = was.queue.drop(1)) to was.queue.firstOrNull() }
                 if (open) {
                     to.write((next?.frame() ?: HEARTBEAT).encodeToByteArray())
                     to.flush()
@@ -98,44 +106,33 @@ internal class Stream(private val streaming: Streaming, private val now: () -> L
      * Ends the stream. The connection is closed on a thread of its own, since closing a chunked body writes to a
      * socket that a stalled browser may not be reading, and the dashboard that offered must not wait on it.
      */
-    fun close() = lock.withLock {
-        open = false
-        arrived.signalAll()
-        out?.let { stream -> Thread.ofVirtual().start { closeQuietly(stream) } }
+    fun close() {
+        held.modify { was -> was.copy(open = false) to was.out.takeIf { was.open } }?.let(::closeLater)
+    }
+
+    private fun closeLater(stream: OutputStream) {
+        Thread.ofVirtual().start { closeQuietly(stream) }
     }
 }
 
 /** Every open stream on this node, which the dashboard fans each event out to. */
 internal class Hub {
-    private val streams = CopyOnWriteArraySet<Stream>()
-    private val lock = ReentrantLock()
-    private val changed = lock.newCondition()
+    private val streams = Shared(emptySet<Stream>(), name = "bank.hub")
 
-    val size: Int get() = streams.size
+    val size: Int get() = streams.peek().size
 
-    fun publish(event: Event) = streams.forEach { stream -> if (!stream.offer(event)) leave(stream) }
+    fun publish(event: Event) = streams.peek().forEach { stream -> if (!stream.offer(event)) leave(stream) }
 
-    fun join(stream: Stream) = change { streams += stream }
+    fun join(stream: Stream) = streams.update { it + stream }
 
-    fun leave(stream: Stream) = change {
-        streams -= stream
+    fun leave(stream: Stream) {
+        streams.update { it - stream }
         stream.close()
     }
 
-    private fun change(what: () -> Unit) = lock.withLock {
-        what()
-        changed.signalAll()
-    }
-
     /** Waits up to [within] until the number of streams satisfies [until]; whether it did. */
-    fun await(within: Duration, until: (Int) -> Boolean): Boolean = lock.withLock {
-        var left = within.inWholeNanoseconds
-        while (!until(streams.size)) {
-            if (left <= 0) return false
-            left = changed.awaitNanos(left)
-        }
-        true
-    }
+    fun await(within: Duration, until: (Int) -> Boolean): Boolean =
+        timeoutOrNull(within) { streams.awaitUntil { until(it.size) } } != null
 }
 
 private fun closeQuietly(stream: OutputStream) {

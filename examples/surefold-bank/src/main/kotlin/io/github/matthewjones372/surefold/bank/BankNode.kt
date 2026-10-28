@@ -1,5 +1,6 @@
 package io.github.matthewjones372.surefold.bank
 
+import io.github.matthewjones372.surefold.Promise
 import io.github.matthewjones372.surefold.actor.ActorRef
 import io.github.matthewjones372.surefold.actor.AskFailure
 import io.github.matthewjones372.surefold.actor.Journal
@@ -9,6 +10,7 @@ import io.github.matthewjones372.surefold.actor.ask
 import io.github.matthewjones372.surefold.actor.journal
 import io.github.matthewjones372.surefold.actor.remote.node
 import io.github.matthewjones372.surefold.actor.spawn
+import io.github.matthewjones372.surefold.awaitValue
 import io.github.matthewjones372.surefold.cluster.Cluster
 import io.github.matthewjones372.surefold.cluster.Discovery
 import io.github.matthewjones372.surefold.cluster.Downing
@@ -23,9 +25,7 @@ import io.github.matthewjones372.surefold.fail.Either
 import io.github.matthewjones372.surefold.increment
 import io.github.matthewjones372.surefold.metrics
 import io.github.matthewjones372.surefold.scope
-import java.util.concurrent.CompletableFuture
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
@@ -79,8 +79,8 @@ internal class BankNode(
     /** This node's browsers' streams, fed by its dashboard. */
     val hub = Hub()
     private val recorder = Recorder()
-    private val done = CountDownLatch(1)
-    private val started = CompletableFuture<Parts>()
+    private val done = Promise<Nothing, Unit>("bank.done")
+    private val started = Promise<Nothing, Parts>("bank.started")
     private val thread = Thread.ofPlatform().name("bank-$name").start {
         metrics.locally(recorder) { run(port, seeds, journal, settings, ended) }
     }
@@ -104,12 +104,12 @@ internal class BankNode(
                 events.publish(BankEvent.Ended(id, saga.from, saga.to, saga.pence, saga.phase.name, ms))
                 ended(id, saga)
             }
-            val outbox = CompletableFuture<Outbox>()
+            val outbox = Promise<Nothing, Outbox>("bank.outbox")
             val accounts = cluster.sharding("account", AccountCodec, settings.passivateAfter) { id ->
-                account(id) { transfer, answer -> outbox.get().toTransfer(transfer, answer) }
+                account(id) { transfer, answer -> outbox.awaitValue().toTransfer(transfer, answer) }
             }
             val transfers = cluster.sharding("transfer", TransferCodec, settings.passivateAfter) { id ->
-                transfer(id, { account, command -> outbox.get().toAccount(account, command) }, announce)
+                transfer(id, { account, command -> outbox.awaitValue().toAccount(account, command) }, announce)
             }
 
             val watcher = members.subscriber { event, seen ->
@@ -120,18 +120,19 @@ internal class BankNode(
             }
             cluster.subscribe(spawn("members", watcher))
             members.await(1.minutes) { seen -> seen.members[cluster.self]?.status == Status.Up }
-            outbox.complete(
+            outbox.succeed(
                 Outbox(
                     accounts.reliable(PRODUCER, settings.resendAfter, KEEP, durable = true),
                     transfers.reliable(PRODUCER, settings.resendAfter, KEEP, durable = true),
                 ),
             )
-            started.complete(Parts(cluster, accounts, transfers, outbox.get(), load))
-            done.await()
+            started.succeed(Parts(cluster, accounts, transfers, outbox.awaitValue(), load))
+            done.awaitValue()
         }
     }
 
-    private val parts: Parts get() = started.get(1, TimeUnit.MINUTES)
+    private val parts: Parts
+        get() = started.awaitValue(within = 1.minutes) ?: throw TimeoutException("bank-$name did not start")
 
     fun open(account: String, pence: Long): Either<AskFailure, Long> =
         parts.accounts.entity(account).ask(ASK) { Open(pence, it) }
@@ -151,7 +152,7 @@ internal class BankNode(
     fun load(on: Boolean) = parts.load.tell(if (on) Load.On else Load.Off)
 
     override fun close() {
-        done.countDown()
+        done.succeed(Unit)
         thread.join()
     }
 
