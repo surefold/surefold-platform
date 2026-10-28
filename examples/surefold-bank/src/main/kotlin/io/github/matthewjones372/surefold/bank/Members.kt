@@ -1,13 +1,13 @@
 package io.github.matthewjones372.surefold.bank
 
+import io.github.matthewjones372.surefold.Shared
 import io.github.matthewjones372.surefold.actor.behaviour
 import io.github.matthewjones372.surefold.actor.remote.Node
 import io.github.matthewjones372.surefold.actor.stay
 import io.github.matthewjones372.surefold.cluster.Member
 import io.github.matthewjones372.surefold.cluster.MemberEvent
 import io.github.matthewjones372.surefold.cluster.Status
-import java.util.concurrent.locks.ReentrantLock
-import kotlin.concurrent.withLock
+import io.github.matthewjones372.surefold.timeoutOrNull
 import kotlin.time.Duration
 
 /** The members one node has heard of, by their events: who is in, and who some member cannot reach. */
@@ -27,31 +27,18 @@ internal data class Seen(val members: Map<Node, Member> = emptyMap(), val unreac
  * library's own and internal, so the bank keeps its own copy of the view, built from the events it is told.
  */
 internal class Members {
-    private val lock = ReentrantLock()
-    private val changed = lock.newCondition()
+    private val view = Shared(Seen(), name = "bank.members")
 
-    @Volatile
-    var seen: Seen = Seen()
-        private set
+    val seen: Seen get() = view.peek()
 
     /** The subscriber: it keeps [seen] and hands each event, with what it made of it, to [heard]. */
     fun subscriber(heard: (MemberEvent, Seen) -> Unit) = behaviour<MemberEvent, Unit>(Unit) { _, _, event ->
-        val next = lock.withLock {
-            seen = seen.after(event)
-            changed.signalAll()
-            seen
-        }
+        val next = view.modify { was -> was.after(event).let { it to it } }
         heard(event, next)
         stay()
     }
 
     /** Waits up to [within] until what has been seen satisfies [until]; whether it did. */
-    fun await(within: Duration, until: (Seen) -> Boolean): Boolean = lock.withLock {
-        var left = within.inWholeNanoseconds
-        while (!until(seen)) {
-            if (left <= 0) return false
-            left = changed.awaitNanos(left)
-        }
-        true
-    }
+    fun await(within: Duration, until: (Seen) -> Boolean): Boolean =
+        timeoutOrNull(within) { view.awaitUntil(until) } != null
 }

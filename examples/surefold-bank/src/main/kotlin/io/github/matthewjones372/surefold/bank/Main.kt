@@ -1,11 +1,12 @@
 package io.github.matthewjones372.surefold.bank
 
+import io.github.matthewjones372.surefold.Promise
 import io.github.matthewjones372.surefold.actor.InMemoryJournal
 import io.github.matthewjones372.surefold.actor.journal.jdbc.JdbcJournal
 import io.github.matthewjones372.surefold.actor.remote.Node
+import io.github.matthewjones372.surefold.awaitValue
 import io.github.matthewjones372.surefold.cluster.Discovery
 import io.github.matthewjones372.surefold.logInfo
-import java.util.concurrent.CompletableFuture
 import kotlin.time.Duration.Companion.minutes
 
 /** The three nodes: each one's name, the port its cluster listens on, and the port it serves HTTP on. */
@@ -26,10 +27,10 @@ fun main(args: Array<String>) {
     val journal = pool?.let(::JdbcJournal) ?: InMemoryJournal()
     val seeds = nodes.map { (_, port) -> Node("", "127.0.0.1", port) }.let { Discovery { it } }
     val chosen = nodes.filter { (name) -> only == null || name == only }
-    val started = CompletableFuture<List<Pair<BankNode, Api>>>()
+    val started = Promise<Nothing, List<Pair<BankNode, Api>>>("bank.nodes")
     // The admin's crash button: the node and its server go as a crash does, on a thread of their own.
     val crash = { name: String ->
-        val found = started.get().firstOrNull { (node) -> node.name == name }
+        val found = started.awaitValue().firstOrNull { (node) -> node.name == name }
         found?.let { (node, api) ->
             Thread.ofVirtual().start {
                 api.close()
@@ -41,7 +42,7 @@ fun main(args: Array<String>) {
     val running = chosen.map { (name, port, http) ->
         BankNode(name, port, seeds, journal).let { it to Api(it, http, crash = crash) }
     }
-    started.complete(running)
+    started.succeed(running)
     Runtime.getRuntime().addShutdownHook(
         Thread {
             running.forEach { (node, api) ->
