@@ -36,7 +36,7 @@ data class Session(
 /** A session just made, and its [token]: the only time the token is seen, to go in the cookie. */
 data class Created(val token: Secret, val session: Session)
 
-/** Sessions behind an opaque token. Pelican's `SessionResolver` adapter sits on this once that is released. */
+/** Sessions behind an opaque token, which an HTTP layer resolves from the request's cookie. */
 interface Sessions {
     fun create(user: UserId, tenant: String? = null): Created
 

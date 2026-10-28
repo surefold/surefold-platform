@@ -11,10 +11,9 @@ dependencies {
 }
 ```
 
-Pelican is adding `IdempotencyStore` and `RateLimiter` interfaces for its HTTP side: reading the `Idempotency-Key`
-header, fingerprinting the request, and answering 409, 422 or 429. Until they are released, a service calls these
-stores from its handlers, as below; the adapters, `surefold-pelican-idempotency` and `surefold-pelican-ratelimit`,
-will be a few lines each.
+These stores hold the state; reading the `Idempotency-Key` header, fingerprinting the request, and answering 409, 422
+or 429 belong to the HTTP layer. A service calls them from its handlers, as below. Surefold ships no adapter to any
+HTTP framework: a framework built on Surefold, such as Pelican, puts its own interfaces over these stores.
 
 <!-- http-stores -->
 ```kotlin

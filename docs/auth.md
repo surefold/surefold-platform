@@ -161,7 +161,8 @@ against the provider's keys, its issuer, audience, expiry and nonce, each with i
 provider's subject and issuer; key the service's user on both, not on the email, which `OidcIdentity` carries only
 when the provider says it is verified.
 
-## With Pelican
+## Over HTTP
 
-Pelican is adding a `SessionResolver` for its HTTP side: reading the cookie, CSRF, and per-endpoint permission
-checks. Until it is released, a service calls `Sessions.resolve` from its handlers; the adapter will be a few lines.
+Reading the cookie, CSRF and per-endpoint permission checks belong to the HTTP layer. A service calls
+`Sessions.resolve` from its handlers; Surefold ships no adapter to any HTTP framework, and a framework built on
+Surefold, such as Pelican, puts its own interface over `Sessions`.
