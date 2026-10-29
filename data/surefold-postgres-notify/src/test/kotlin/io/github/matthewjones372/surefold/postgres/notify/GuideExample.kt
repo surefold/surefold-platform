@@ -18,8 +18,16 @@ sealed interface LiveEvent {
 }
 
 /** One listener for the process, on a connection of its own, fanned out to every open page through [hub]. */
-fun liveEvents(listenSource: DataSource, hub: Hub<LiveEvent>): Running<HubRefused, Unit> =
-    PostgresNotifications.listen(listenSource, channels = setOf("bookings_live"))
+fun liveEvents(
+    listenSource: DataSource,
+    hub: Hub<LiveEvent>,
+    onListening: () -> Unit = {},
+    onDisconnected: () -> Unit = {},
+): Running<HubRefused, Unit> =
+    PostgresNotifications.listen(
+        listenSource, channels = setOf("bookings_live"),
+        onListening = onListening, onDisconnected = onDisconnected,
+    )
         .map { notice ->
             when (notice) {
                 is Notice.Received -> LiveEvent.Booked(bookingId = notice.payload)

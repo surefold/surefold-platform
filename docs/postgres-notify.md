@@ -12,6 +12,10 @@ dependencies {
 
 ## Listening, and sending
 
+**Next-release example:** the lifecycle callbacks shown here are not available in the released `0.15.0`
+dependency above. They target the next release, whose version is not selected yet. With `0.15.0`, use the original
+`listen(source, channels, reconnect)` overload and omit the callback parameters.
+
 <!-- postgres-notify -->
 ```kotlin
 import io.github.matthewjones372.surefold.stream.Forks
@@ -32,8 +36,16 @@ sealed interface LiveEvent {
 }
 
 /** One listener for the process, on a connection of its own, fanned out to every open page through [hub]. */
-fun liveEvents(listenSource: DataSource, hub: Hub<LiveEvent>): Running<HubRefused, Unit> =
-    PostgresNotifications.listen(listenSource, channels = setOf("bookings_live"))
+fun liveEvents(
+    listenSource: DataSource,
+    hub: Hub<LiveEvent>,
+    onListening: () -> Unit = {},
+    onDisconnected: () -> Unit = {},
+): Running<HubRefused, Unit> =
+    PostgresNotifications.listen(
+        listenSource, channels = setOf("bookings_live"),
+        onListening = onListening, onDisconnected = onDisconnected,
+    )
         .map { notice ->
             when (notice) {
                 is Notice.Received -> LiveEvent.Booked(bookingId = notice.payload)
@@ -56,6 +68,19 @@ named; on another driver the run fails as it opens.
 A channel is a lower-case identifier, such as `bookings_live`: `LISTEN` takes no bound parameter, and folds an unquoted
 name to lower case where `pg_notify` does not. `notify` refuses a payload past 7,999 bytes. Send an id, and read the
 row it names.
+
+## Subscription readiness
+
+The overload with `onListening` and `onDisconnected` observes subscription lifetime without emitting another
+notice. `onListening` runs after every channel's `LISTEN` succeeds, before a reconnect's `Gap` or notifications.
+`onDisconnected` runs once after that established connection releases, on loss, stop, downstream completion or
+failure. An initial connection or `LISTEN` failure calls neither. The original overload keeps its signatures and
+reconnect defaults, with no callbacks.
+
+Callbacks run synchronously on the stream's owned pull run. A callback defect, including `SQLException`, ends the
+run as `Exit.Died` and is never a reconnect attempt. A failed `onListening` still releases the subscription and
+calls `onDisconnected`. `Running.close()` cancels in-flight work and joins all lifecycle callbacks before returning.
+Keep callbacks short and interruptible; the consumer decides how these observations affect its readiness.
 
 ## Reconnecting, and a Gap
 

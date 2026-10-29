@@ -8,6 +8,7 @@ import io.github.matthewjones372.surefold.counter
 import io.github.matthewjones372.surefold.increment
 import io.github.matthewjones372.surefold.logInfo
 import io.github.matthewjones372.surefold.logWarn
+import io.github.matthewjones372.surefold.resourceScope
 import io.github.matthewjones372.surefold.stream.Stream
 import io.github.matthewjones372.surefold.stream.blocking
 import java.lang.reflect.InvocationTargetException
@@ -34,12 +35,21 @@ object PostgresNotifications {
         source: DataSource,
         channels: Set<String>,
         reconnect: Schedule<Throwable, Any?> = RECONNECT,
+    ): Stream<Nothing, Notice> = listen(source, channels, reconnect, {}, {})
+
+    /** Lifecycle callbacks observe the owned subscription without adding a notice to its data. */
+    fun listen(
+        source: DataSource,
+        channels: Set<String>,
+        reconnect: Schedule<Throwable, Any?> = RECONNECT,
+        onListening: () -> Unit,
+        onDisconnected: () -> Unit,
     ): Stream<Nothing, Notice> {
         require(channels.isNotEmpty()) { "PostgresNotifications.listen names no channel to listen on" }
         channels.forEach(::checked)
         val time = clock.get()
         return Stream.blocking(
-            open = { Listening(source, channels, reconnect, time) },
+            open = { Listening(source, channels, reconnect, time, onListening, onDisconnected) },
             next = Listening::next,
             wake = Listening::wake,
             close = Listening::close,
@@ -88,6 +98,8 @@ private class Listening(
     private val channels: Set<String>,
     private val reconnect: Schedule<Throwable, Any?>,
     private val time: Clock,
+    private val onListening: () -> Unit,
+    private val onDisconnected: () -> Unit,
 ) {
     private val heard = ArrayDeque<Notice>()
     private var connected: Pair<Connection, Driver>? = null
@@ -108,8 +120,7 @@ private class Listening(
             try {
                 heard.addAll(driver.notifications(connection, WAIT_MILLIS))
             } catch (failed: SQLException) {
-                connection.close()
-                connected = null
+                close()
                 lost = true
                 counter("postgres.notify.reconnects").increment()
                 logWarn("surefold-postgres-notify: lost the connection listening on $named, and will listen again")
@@ -126,7 +137,12 @@ private class Listening(
     }
 
     fun close() {
-        connected?.first?.close()
+        val subscription = connected ?: return
+        connected = null
+        resourceScope {
+            onRelease { onDisconnected() }
+            subscription.first.close()
+        }
     }
 
     private val named: String get() = channels.joinToString()
@@ -141,23 +157,27 @@ private class Listening(
             rest(failed)
             return null
         }
-        return try {
+        val subscription = try {
             val driver = Driver.of(connection)
             connection.autoCommit = true
             connection.createStatement().use { statement -> channels.forEach { statement.execute("listen $it") } }
-            logInfo("surefold-postgres-notify: listening on $named")
-            if (lost) heard.addLast(Notice.Gap)
-            lost = false
-            retry = reconnect.step
-            (connection to driver).also { connected = it }
+            connection to driver
         } catch (failed: SQLException) {
             connection.close()
             rest(failed)
-            null
+            return null
         } catch (other: Throwable) {
             connection.close()
             throw other
         }
+        connected = subscription
+        // Caller defects, including SQLException, must not be mistaken for a database disconnection.
+        onListening()
+        logInfo("surefold-postgres-notify: listening on $named")
+        if (lost) heard.addLast(Notice.Gap)
+        lost = false
+        retry = reconnect.step
+        return subscription
     }
 
     /** Waits out [failed]'s delay, or throws it once [reconnect] stops; a wake ends the wait. */
