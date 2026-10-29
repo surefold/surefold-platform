@@ -35,12 +35,7 @@ internal class KmsRootCreation(
                 ensure(request.region.isNotBlank() && request.policy.isNotBlank()) {
                     KeyOperationFailure(op, KeyFailureCode.InvalidInput)
                 }
-                val sdk = creation.client(request.region, op).bind()
-                // CreateKey has no idempotency token; an SDK retry can create an uncheckpointed second root.
-                val configuration = sdk.serviceClientConfiguration().overrideConfiguration()
-                ensure(configuration?.retryStrategy()?.orElse(null)?.maxAttempts() == 1) {
-                    KeyOperationFailure(op, KeyFailureCode.Refused)
-                }
+                val sdk = singleAttemptClient(creation, request.region, op).bind()
                 val response = sdk.createKey(
                     CreateKeyRequest.builder().policy(request.policy).description(request.description)
                         .tags(request.tags.map { (key, value) -> Tag.builder().tagKey(key).tagValue(value).build() })
