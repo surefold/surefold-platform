@@ -39,6 +39,27 @@ internal class InMemoryRootChanges(private val store: InMemoryKeyStore) {
             }
         }
 
+    fun <A> afterData(
+        op: KeyOperation, root: RootKey, reply: InMemoryKeyReply<A>, erase: (A) -> Unit,
+    ): InMemoryKeyReply<A> {
+        if (reply is Either.Left) return reply
+        var delivered = false
+        try {
+            val result = store.state.modify { current ->
+                val index = current.faults.indexOfFirst {
+                    it.operation == op && it.afterSuccess && (it.root == null || it.root == root)
+                }
+                if (index < 0) current to reply else current.copy(
+                    faults = current.faults.filterIndexed { position, _ -> position != index },
+                ) to failure(op, current.faults[index].code)
+            }
+            delivered = result is Either.Right
+            return result
+        } finally {
+            if (!delivered && reply is Either.Right) erase(reply.value)
+        }
+    }
+
     fun preflight(expected: ExpectedKeySet): InMemoryKeyReply<Unit> = attempt {
         (listOf(expected.primary) + expected.replicas).forEach {
             observe(KeyOperation.Describe, it.location.root) { current, held -> current.metadata(held) }.bind()

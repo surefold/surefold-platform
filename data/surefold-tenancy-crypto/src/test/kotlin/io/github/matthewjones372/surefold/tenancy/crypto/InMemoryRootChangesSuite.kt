@@ -146,6 +146,54 @@ object InMemoryRootChangesSuite : Suite() {
                     if (retryable) KeyFailureCode.Unavailable else null
             }
         }
+
+        test("lost data replies erase only unreturned output and consume only matching after faults") {
+            val world = ChangeWorld()
+            val root = world.primary.location.root
+            val output = byteArrayOf(1, 2, 3)
+            world.fault(KeyOperation.Wrap, KeyFailureCode.Refused, root)
+            world.fault(KeyOperation.Wrap, KeyFailureCode.Unavailable, world.replica.location.root, true)
+            world.fault(KeyOperation.Wrap, KeyFailureCode.UncertainMutation, root, true)
+            world.changes.afterData(KeyOperation.Wrap, root, output.right()) { it.fill(0) } shouldBe
+                rejected(KeyOperation.Wrap, KeyFailureCode.UncertainMutation)
+            output.toList() shouldBe listOf<Byte>(0, 0, 0)
+            world.store.state.peek().faults.size shouldBe 2
+            world.changes.afterData(KeyOperation.Wrap, root, Unit.right()) {}.value() shouldBe Unit
+            world.store.state.peek().faults.size shouldBe 2
+        }
+
+        test("data cleanup runs after fault consumption has committed even if cleanup throws") {
+            val world = ChangeWorld()
+            val root = world.primary.location.root
+            val generated = GeneratedKey(byteArrayOf(1), byteArrayOf(2))
+            world.fault(KeyOperation.Generate, KeyFailureCode.Unavailable, root, true)
+            var cleanupThrew = false
+            try {
+                world.changes.afterData(KeyOperation.Generate, root, generated.right()) {
+                    it.plaintext.fill(0)
+                    it.wrapped.fill(0)
+                    error("cleanup rejected")
+                }
+            } catch (_: IllegalStateException) {
+                cleanupThrew = true
+            }
+            cleanupThrew shouldBe true
+            generated.plaintext.toList() shouldBe listOf<Byte>(0)
+            generated.wrapped.toList() shouldBe listOf<Byte>(0)
+            world.store.state.peek().faults shouldBe emptyList()
+        }
+
+        test("ordinary data failures do not consume an after success fault or run output cleanup") {
+            val world = ChangeWorld()
+            val root = world.primary.location.root
+            world.fault(KeyOperation.Unwrap, KeyFailureCode.Unavailable, root, true)
+            var erased = false
+            val failed: Either<KeyOperationFailure, ByteArray> =
+                KeyOperationFailure(KeyOperation.Unwrap, KeyFailureCode.InvalidCiphertext).left()
+            world.changes.afterData(KeyOperation.Unwrap, root, failed) { erased = true } shouldBe failed
+            erased shouldBe false
+            world.store.state.peek().faults.size shouldBe 1
+        }
     }
 }
 
