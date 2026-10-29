@@ -33,6 +33,24 @@ deleted root, a policy), `Invalid` when the key, root or context is wrong, and `
 matches `''`: a pooled connection that a tenant transaction has used reads `app.tenant_id` as `''` once it ends, so
 without that test any query on it outside `TenantTransactions` would see the platform's rows.
 
+## Explicit operations
+
+`KeyOperations` adds explicit roots beside `Kms`, through `DataKeyOperations` and `RootOperations`.
+`EncryptionContext` snapshots exactly the supplied entries, including platform conventions; it inserts no defaults.
+Generation returns a 32-byte `GeneratedKey`; wrap preserves supplied bytes, and unwrap requires the same root/context.
+Returned key arrays belong to the caller for erasure, as in the existing crypto API (spec 0254).
+
+Root discovery, full tag reads and listing are observational. Multi-region primary creation requires explicit
+policy, description and tags;
+alias binding, rotation and replica creation/inspection are separate resumable operations. Metadata carries regional
+relationships and pending states. Requests and evidence containers redact sensitive contents when rendered.
+`KeyOperationFailure` contains only an operation and closed diagnostic code, independently of `KeyError`.
+
+Deletion takes an `ExpectedKeySet` and whole waiting days (7–30). All locations, relationships and required tag
+subsets must match before scheduling; replicas go first, aliases remain, and retries preserve accepted dates.
+`DeletionProgress` retains regional acceptances alongside a stopping failure; dates can be unknown. Discovery
+cannot prove destruction. This is the neutral contract; provider implementations follow separately (spec 0260).
+
 ## Sealing values
 
 ```kotlin
