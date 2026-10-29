@@ -6,15 +6,14 @@ after commit, in commit order, to every listener, and never delivers one whose t
 
 ```kotlin
 dependencies {
-    implementation("io.github.matthewjones372:surefold-postgres-notify:0.15.0")
+    implementation("io.github.matthewjones372:surefold-postgres-notify:0.16.0")
 }
 ```
 
 ## Listening, and sending
 
-**Next-release example:** the lifecycle callbacks shown here are not available in the released `0.15.0`
-dependency above. They target the next release, whose version is not selected yet. With `0.15.0`, use the original
-`listen(source, channels, reconnect)` overload and omit the callback parameters.
+Subscription lifecycle callbacks are available from `0.16.0`. Earlier releases retain the original
+`listen(source, channels, reconnect)` overload without the callback parameters.
 
 <!-- postgres-notify -->
 ```kotlin
