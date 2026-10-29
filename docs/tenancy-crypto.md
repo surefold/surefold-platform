@@ -33,6 +33,31 @@ deleted root, a policy), `Invalid` when the key, root or context is wrong, and `
 matches `''`: a pooled connection that a tenant transaction has used reads `app.tenant_id` as `''` once it ends, so
 without that test any query on it outside `TenantTransactions` would see the platform's rows.
 
+## Explicit operations
+
+These operations are **unreleased**; the 0.16.0 coordinates above provide the existing APIs only.
+
+`KeyOperations` adds explicit roots beside `Kms`, through `DataKeyOperations` and `RootOperations`.
+`EncryptionContext` snapshots exactly the supplied entries, including platform conventions; it inserts no defaults.
+Generation returns a 32-byte `GeneratedKey`; wrap preserves supplied bytes, and unwrap requires the same root/context.
+Returned key arrays belong to the caller for erasure, as in the existing crypto API (spec 0254).
+
+Root discovery, full tag reads and listing are observational. Multi-region primary creation requires explicit
+policy, description and tags;
+alias binding, rotation and replica creation/inspection are separate resumable operations. Metadata carries regional
+relationships and pending states. Requests and evidence containers redact sensitive contents when rendered.
+`KeyOperationFailure` contains only an operation and closed diagnostic code, independently of `KeyError`.
+
+Deletion takes an `ExpectedKeySet` and whole waiting days (7–30). All locations, relationships and required tag
+subsets must match before scheduling; replicas go first, aliases remain, and retries preserve accepted dates.
+`DeletionProgress` retains regional acceptances alongside a stopping failure; dates can be unknown. Discovery
+cannot prove destruction. The AWS implementation follows separately (spec 0260).
+
+`InMemoryKeyOperations` takes an injected `Clock` and keeps related regional roots under the same wrapping material.
+Its `failNext` and `setState` controls model incomplete observations, lost replies and pending regional progress;
+`creation` and `rotationEnabled` expose creation evidence without rendering policy or tag contents.
+It does not prove IAM or eventual consistency, and advancing time never deletes a root automatically.
+
 ## Sealing values
 
 ```kotlin
