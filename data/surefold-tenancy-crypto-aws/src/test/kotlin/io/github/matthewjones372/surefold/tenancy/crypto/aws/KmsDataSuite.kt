@@ -86,11 +86,11 @@ object KmsDataSuite : Suite() {
             }
         }
 
-        test("read preference never reroutes generation or wrapping") {
+        test("default data operations retain the supplied source Region") {
             val primary = DataStub(responseArn = multiArn(DATA_REGION))
             val replica = DataStub(READ_REGION, responseArn = multiArn(READ_REGION))
             val operations = KmsDataOperations(
-                KmsObservations(mapOf(DATA_REGION to primary, READ_REGION to replica)), READ_REGION,
+                KmsObservations(mapOf(DATA_REGION to primary, READ_REGION to replica)),
             )
             operations.generateDataKey(RootKey(multiArn(DATA_REGION)), platformContext()).isRight() shouldBe true
             operations.wrap(RootKey(multiArn(DATA_REGION)), material(), platformContext()).isRight() shouldBe true
@@ -98,24 +98,76 @@ object KmsDataSuite : Suite() {
             replica.requests.peek() shouldBe emptyList()
         }
 
+        test("preferred data Region generates and wraps through only the verified local client") {
+            val source = RootKey(multiArn(DATA_REGION))
+            val plaintext = material()
+            val context = EncryptionContext(mapOf("tenant_id" to "platform", "purpose" to "", "Version" to "01"))
+            val local = DataStub(READ_REGION, responseArn = multiArn(READ_REGION), encrypt = { request ->
+                request.plaintext().asByteArray().toList() shouldBe plaintext.toList()
+                EncryptResponse.builder().keyId(multiArn(READ_REGION))
+                    .ciphertextBlob(SdkBytes.fromByteArray(ciphertext())).build()
+            })
+            val operations = KmsDataOperations(KmsObservations(mapOf(READ_REGION to local)), READ_REGION)
+            val generated = operations.generateDataKey(source, context).value()
+            generated.plaintext.toList() shouldBe material().toList()
+            generated.wrapped.toList() shouldBe ciphertext().toList()
+            operations.wrap(source, plaintext, context).value().toList() shouldBe ciphertext().toList()
+            source.id shouldBe multiArn(DATA_REGION)
+            plaintext.toList() shouldBe material().toList()
+            val requests = local.requests.peek()
+            requests.filterIsInstance<DescribeKeyRequest>().map { it.keyId() } shouldBe
+                List(2) { multiArn(READ_REGION) }
+            val generate = requests.filterIsInstance<GenerateDataKeyRequest>().single()
+            generate.keyId() shouldBe multiArn(READ_REGION)
+            generate.keySpec() shouldBe DataKeySpec.AES_256
+            generate.encryptionContext() shouldBe context.entries
+            val encrypt = requests.filterIsInstance<EncryptRequest>().single()
+            encrypt.keyId() shouldBe multiArn(READ_REGION)
+            encrypt.encryptionContext() shouldBe context.entries
+        }
+
+        test("locally routed generation and wrapping require the returned local identity") {
+            for ((arn, code) in listOf(
+                multiArn(DATA_REGION) to KeyFailureCode.Conflict,
+                null to KeyFailureCode.IncompleteEvidence,
+            )) {
+                val plaintext = material()
+                val generated = GenerateDataKeyResponse.builder().keyId(arn)
+                    .plaintext(SdkBytes.fromByteArrayUnsafe(plaintext))
+                    .ciphertextBlob(SdkBytes.fromByteArray(ciphertext())).build()
+                val local = DataStub(READ_REGION, responseArn = arn, generate = { generated })
+                val operations = KmsDataOperations(KmsObservations(mapOf(READ_REGION to local)), READ_REGION)
+                operations.generateDataKey(RootKey(multiArn(DATA_REGION)), platformContext()).failure() shouldBe
+                    KeyOperationFailure(KeyOperation.Generate, code)
+                plaintext.all { it == 0.toByte() } shouldBe true
+                val input = material()
+                operations.wrap(RootKey(multiArn(DATA_REGION)), input, platformContext()).failure() shouldBe
+                    KeyOperationFailure(KeyOperation.Wrap, code)
+                input.toList() shouldBe material().toList()
+            }
+        }
+
         test("local metadata must observe both the stored source and selected candidate") {
             val unrelated = localMetadata().toBuilder().multiRegionConfiguration(
                 MultiRegionConfiguration.builder().multiRegionKeyType("REPLICA")
                     .primaryKey(dataRelation("eu-central-1")).replicaKeys(dataRelation(READ_REGION)).build(),
             ).build()
-            for (metadata in listOf(
-                null, unrelated,
-                localMetadata().toBuilder().keyId("mrk-${"b".repeat(32)}").build(),
-                localMetadata().toBuilder().awsAccountId("999999999999").build(),
-                localMetadata().toBuilder().arn(multiArn(DATA_REGION)).build(),
-                localMetadata().toBuilder().multiRegionConfiguration(null as MultiRegionConfiguration?).build(),
+            for ((metadata, code) in listOf(
+                null to KeyFailureCode.IncompleteEvidence,
+                unrelated to KeyFailureCode.Conflict,
+                localMetadata().toBuilder().keyId("mrk-${"b".repeat(32)}").build() to KeyFailureCode.Conflict,
+                localMetadata().toBuilder().awsAccountId("999999999999").build() to KeyFailureCode.Conflict,
+                localMetadata().toBuilder().arn(multiArn(DATA_REGION)).build() to KeyFailureCode.Conflict,
+                localMetadata().toBuilder().multiRegionConfiguration(null as MultiRegionConfiguration?).build() to
+                    KeyFailureCode.IncompleteEvidence,
             )) {
                 val local = DataStub(READ_REGION, responseArn = multiArn(READ_REGION), metadata = metadata)
-                val result = KmsDataOperations(KmsObservations(mapOf(READ_REGION to local)), READ_REGION)
-                    .unwrap(RootKey(multiArn(DATA_REGION)), ciphertext(), platformContext())
-                result.isLeft() shouldBe true
-                result.failure().operation shouldBe KeyOperation.Unwrap
-                local.requests.peek().filterIsInstance<DecryptRequest>() shouldBe emptyList()
+                val operations = KmsDataOperations(KmsObservations(mapOf(READ_REGION to local)), READ_REGION)
+                for ((operation, result) in dataResults(operations)) {
+                    result.failure() shouldBe KeyOperationFailure(operation, code)
+                }
+                local.requests.peek().size shouldBe 3
+                local.requests.peek().all { it is DescribeKeyRequest } shouldBe true
             }
         }
 
@@ -125,24 +177,25 @@ object KmsDataSuite : Suite() {
                 SdkClientException.create("secret context"),
             )) {
                 val local = DataStub(READ_REGION, describe = { throw failure })
-                val result = KmsDataOperations(KmsObservations(mapOf(READ_REGION to local)), READ_REGION)
-                    .unwrap(RootKey(multiArn(DATA_REGION)), ciphertext(), platformContext())
-                result.failure().operation shouldBe KeyOperation.Unwrap
-                result.failure().code shouldBe if (failure is NotFoundException) {
-                    KeyFailureCode.NotObserved
-                } else KeyFailureCode.Unavailable
-                local.requests.peek().size shouldBe 1
+                val operations = KmsDataOperations(KmsObservations(mapOf(READ_REGION to local)), READ_REGION)
+                for ((operation, result) in dataResults(operations)) {
+                    result.failure().operation shouldBe operation
+                    result.failure().code shouldBe if (failure is NotFoundException) {
+                        KeyFailureCode.NotObserved
+                    } else KeyFailureCode.Unavailable
+                }
+                local.requests.peek().size shouldBe 3
             }
-            KmsDataOperations(KmsObservations(emptyMap()), READ_REGION)
-                .unwrap(RootKey(multiArn(DATA_REGION)), ciphertext(), platformContext()).failure().code shouldBe
-                KeyFailureCode.Unavailable
+            for ((operation, result) in dataResults(KmsDataOperations(KmsObservations(emptyMap()), READ_REGION))) {
+                result.failure() shouldBe KeyOperationFailure(operation, KeyFailureCode.Unavailable)
+            }
             val ordinary = DataStub(READ_REGION)
             KmsDataOperations(KmsObservations(mapOf(READ_REGION to ordinary)), READ_REGION)
                 .unwrap(RootKey(DATA_ARN), ciphertext(), platformContext()).isLeft() shouldBe true
             ordinary.requests.peek() shouldBe emptyList()
         }
 
-        test("local transient states remain retryable while disabled and pending states refuse reads") {
+        test("local transient states remain retryable while disabled and pending states refuse data operations") {
             for ((state, code) in listOf(
                 "Creating" to KeyFailureCode.Unavailable, "Updating" to KeyFailureCode.Unavailable,
                 "Unavailable" to KeyFailureCode.Unavailable, "future" to KeyFailureCode.Unavailable,
@@ -150,10 +203,11 @@ object KmsDataSuite : Suite() {
                 "PendingReplicaDeletion" to KeyFailureCode.Refused,
             )) {
                 val local = DataStub(READ_REGION, metadata = localMetadata().toBuilder().keyState(state).build())
-                KmsDataOperations(KmsObservations(mapOf(READ_REGION to local)), READ_REGION)
-                    .unwrap(RootKey(multiArn(DATA_REGION)), ciphertext(), platformContext()).failure() shouldBe
-                    KeyOperationFailure(KeyOperation.Unwrap, code)
-                local.requests.peek().size shouldBe 1
+                val operations = KmsDataOperations(KmsObservations(mapOf(READ_REGION to local)), READ_REGION)
+                for ((operation, result) in dataResults(operations)) {
+                    result.failure() shouldBe KeyOperationFailure(operation, code)
+                }
+                local.requests.peek().size shouldBe 3
             }
         }
 
@@ -305,6 +359,18 @@ private fun localMetadata() = KeyMetadata.builder().arn(multiArn(READ_REGION)).k
         MultiRegionConfiguration.builder().multiRegionKeyType("REPLICA").primaryKey(dataRelation(DATA_REGION))
             .replicaKeys(dataRelation(READ_REGION)).build(),
     ).build()
+private fun dataResults(operations: KmsDataOperations): List<Pair<KeyOperation, Either<KeyOperationFailure, *>>> {
+    val root = RootKey(multiArn(DATA_REGION))
+    val plaintext = material()
+    val results = listOf(
+        KeyOperation.Generate to operations.generateDataKey(root, platformContext()),
+        KeyOperation.Wrap to operations.wrap(root, plaintext, platformContext()),
+        KeyOperation.Unwrap to operations.unwrap(root, ciphertext(), platformContext()),
+    )
+    root.id shouldBe multiArn(DATA_REGION)
+    plaintext.toList() shouldBe material().toList()
+    return results
+}
 private fun operations(client: DataStub) = KmsDataOperations(KmsObservations(mapOf(DATA_REGION to client)))
 private fun <A> Either<KeyOperationFailure, A>.value(): A = (this as Either.Right).value
 private fun <A> Either<KeyOperationFailure, A>.failure(): KeyOperationFailure = (this as Either.Left).value
@@ -315,7 +381,7 @@ private class DataStub(
     private val metadata: KeyMetadata? = localMetadata(),
     private val describe: (() -> DescribeKeyResponse)? = null,
     private val generate: (() -> GenerateDataKeyResponse)? = null,
-    private val encrypt: (() -> EncryptResponse)? = null,
+    private val encrypt: ((EncryptRequest) -> EncryptResponse)? = null,
     private val decrypt: (() -> DecryptResponse)? = null,
 ) : KmsClient {
     val requests = Shared(emptyList<Any>())
@@ -334,7 +400,7 @@ private class DataStub(
     }
     override fun encrypt(request: EncryptRequest): EncryptResponse {
         requests.update { it + request }
-        return encrypt?.invoke() ?: EncryptResponse.builder().keyId(responseArn)
+        return encrypt?.invoke(request) ?: EncryptResponse.builder().keyId(responseArn)
             .ciphertextBlob(SdkBytes.fromByteArray(ciphertext())).build()
     }
     override fun decrypt(request: DecryptRequest): DecryptResponse {

@@ -24,17 +24,17 @@ import software.amazon.awssdk.services.kms.model.KmsInvalidStateException
 
 internal class KmsDataOperations(
     private val observations: KmsObservations,
-    private val preferredReadRegion: String? = null,
+    private val preferredDataRegion: String? = null,
 ) : DataKeyOperations {
     override fun generateDataKey(root: RootKey, context: EncryptionContext): Either<KeyOperationFailure, GeneratedKey> =
         kmsCall(KeyOperation.Generate) {
             attempt {
                 val op = KeyOperation.Generate
-                val identity = KmsIdentity.parse(root, op).bind()
+                val identity = dataIdentity(root, op).bind()
                 val client = observations.client(identity.location.region, op).bind()
                 val response = dataCall(identity, op) {
                     client.generateDataKey(
-                        GenerateDataKeyRequest.builder().keyId(root.id).keySpec(DataKeySpec.AES_256)
+                        GenerateDataKeyRequest.builder().keyId(identity.location.root.id).keySpec(DataKeySpec.AES_256)
                             .encryptionContext(context.entries).build(),
                     )
                 }.bind()
@@ -53,13 +53,13 @@ internal class KmsDataOperations(
     ): Either<KeyOperationFailure, ByteArray> = kmsCall(KeyOperation.Wrap) {
         attempt {
             val op = KeyOperation.Wrap
-            val identity = KmsIdentity.parse(root, op).bind()
+            val identity = dataIdentity(root, op).bind()
             val client = observations.client(identity.location.region, op).bind()
             val input = SdkBytes.fromByteArray(plaintext)
             try {
                 val response = dataCall(identity, op) {
                     client.encrypt(
-                        EncryptRequest.builder().keyId(root.id).plaintext(input)
+                        EncryptRequest.builder().keyId(identity.location.root.id).plaintext(input)
                             .encryptionContext(context.entries).build(),
                     )
                 }.bind()
@@ -78,7 +78,7 @@ internal class KmsDataOperations(
     ): Either<KeyOperationFailure, ByteArray> = kmsCall(KeyOperation.Unwrap) {
         attempt {
             val op = KeyOperation.Unwrap
-            val identity = readIdentity(root).bind()
+            val identity = dataIdentity(root, op).bind()
             val client = observations.client(identity.location.region, op).bind()
             val response = dataCall(identity, op) {
                 client.decrypt(
@@ -114,10 +114,9 @@ internal class KmsDataOperations(
         }
     }
 
-    private fun readIdentity(root: RootKey): Either<KeyOperationFailure, KmsIdentity> = attempt {
-        val op = KeyOperation.Unwrap
+    private fun dataIdentity(root: RootKey, op: KeyOperation): Either<KeyOperationFailure, KmsIdentity> = attempt {
         val source = KmsIdentity.parse(root, op).bind()
-        val region = preferredReadRegion
+        val region = preferredDataRegion
         if (region == null || region == source.location.region) return@attempt source
         ensure(source.keyId.startsWith("mrk-")) { conflict(op) }
         val location = source.location
