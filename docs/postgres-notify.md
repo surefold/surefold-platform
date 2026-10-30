@@ -6,7 +6,7 @@ after commit, in commit order, to every listener, and never delivers one whose t
 
 ```kotlin
 dependencies {
-    implementation("io.github.matthewjones372:surefold-postgres-notify:0.16.0")
+    implementation("io.github.matthewjones372:surefold-postgres-notify:0.17.0")
 }
 ```
 

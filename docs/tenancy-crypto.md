@@ -6,8 +6,8 @@ cannot open what they sealed. Delete a tenant's root and every copy of its data 
 
 ```kotlin
 dependencies {
-    implementation("io.github.matthewjones372:surefold-tenancy-crypto:0.16.0")
-    implementation("io.github.matthewjones372:surefold-tenancy-crypto-aws:0.16.0") // AwsKms
+    implementation("io.github.matthewjones372:surefold-tenancy-crypto:0.17.0")
+    implementation("io.github.matthewjones372:surefold-tenancy-crypto-aws:0.17.0") // AwsKms
 }
 ```
 
@@ -35,7 +35,8 @@ without that test any query on it outside `TenantTransactions` would see the pla
 
 ## Explicit operations
 
-These operations are **unreleased**; the 0.16.0 coordinates above provide the existing APIs only.
+The neutral `KeyOperations` contract and `InMemoryKeyOperations` are available from 0.17.0.
+The real AWS implementation of these explicit operations follows separately (spec 0260).
 
 `KeyOperations` adds explicit roots beside `Kms`, through `DataKeyOperations` and `RootOperations`.
 `EncryptionContext` snapshots exactly the supplied entries, including platform conventions; it inserts no defaults.
