@@ -327,7 +327,7 @@ private class CreationStub(
     }
 }
 
-private class CreationWire(private val lost: Boolean) : SdkHttpClient {
+internal class CreationWire(private val lost: Boolean) : SdkHttpClient {
     val bodies = Shared(emptyList<String>())
     val targets = Shared(emptyList<String>())
     override fun close() = Unit
