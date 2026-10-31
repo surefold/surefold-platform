@@ -26,7 +26,7 @@ internal class OwnedKeyMaterial private constructor(
         refused(clock)?.let { return@resourceScope Either.Left(it) }
         val id = Any()
         var handedOver = false
-        onRelease {
+        onRelease { _ ->
             if (!handedOver) change { it.copy(views = it.views - id) }
         }
         val admitted = modify {
@@ -60,7 +60,7 @@ internal class OwnedKeyMaterial private constructor(
         refused(clock, id)?.let { return@resourceScope Either.Left(it) }
         val token = Any()
         var working: ByteArray? = null
-        onRelease {
+        onRelease { _ ->
             working?.fill(0)
             change { it.copy(uses = it.uses - token) }
         }
