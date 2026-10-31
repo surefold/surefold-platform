@@ -1,12 +1,19 @@
 package io.github.matthewjones372.surefold.tenancy.crypto
 
+import io.github.matthewjones372.surefold.Clock
+import io.github.matthewjones372.surefold.Resource
 import io.github.matthewjones372.surefold.Shared
 import io.github.matthewjones372.surefold.SingleFlight
 import io.github.matthewjones372.surefold.clock
 import io.github.matthewjones372.surefold.fail.Either
+import io.github.matthewjones372.surefold.fail.flatMap
+import io.github.matthewjones372.surefold.fail.map
 import io.github.matthewjones372.surefold.fail.right
+import io.github.matthewjones372.surefold.resource
 import io.github.matthewjones372.surefold.resourceScope
+import io.github.matthewjones372.surefold.surefoldLocal
 import java.time.Instant
+import java.util.concurrent.CancellationException
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
@@ -91,9 +98,29 @@ class KeyCache(
 /** Pending releases belonging to this cache's ownership protocol. */
 internal class KeyCacheLedger {
     private class ReleaseIntent(val action: () -> Unit)
-    private data class State(val pending: List<ReleaseIntent> = emptyList())
+    data class LoadKey(val slot: KeyCache.Slot, val identity: KeyIdentity?, val epoch: Any)
+    class Receipt(val group: Any, val id: Any, val clock: Clock)
+    private sealed interface Source
+    private class Legacy(val key: DataKey) : Source
+    private class Qualified(val material: OwnedKeyMaterial) : Source
+    private class SourceRef(val id: Any, val source: Source)
+    private sealed interface Outcome
+    private class Value(val result: Either<KeyError, SourceRef>) : Outcome
+    private class Thrown(val failure: Throwable) : Outcome
+    private data class Group(
+        val key: LoadKey, val deadline: Instant, val members: Int = 0,
+        val loader: Any? = null, val outcome: Outcome? = null, val releasing: Boolean = false,
+    )
+    private data class State(
+        val pending: List<ReleaseIntent> = emptyList(),
+        val open: Map<LoadKey, Any> = emptyMap(),
+        val groups: Map<Any, Group> = emptyMap(),
+        val receipts: Map<Any, Any> = emptyMap(),
+        val records: Map<Any, SourceRef> = emptyMap(),
+    )
 
     private val state = Shared(State())
+    private val active = surefoldLocal<Set<Any>> { emptySet() }
 
     fun owe(action: () -> Unit) {
         val intent = ReleaseIntent(action)
@@ -111,4 +138,137 @@ internal class KeyCacheLedger {
             }
         }
     }
+
+    fun enrol(key: LoadKey, clock: Clock, deadline: Instant): Resource<Receipt> = resource {
+        val id = Any()
+        val candidate = Any()
+        val inherited = active.get()
+        onRelease { _ -> finishReceipt(id) }
+        val group = state.modify { current ->
+            val token = current.open[key] ?: candidate
+            check(token !in inherited) { "recursive key load" }
+            val held = current.groups[token] ?: Group(key, deadline)
+            current.copy(
+                open = current.open + (key to token), receipts = current.receipts + (id to token),
+                groups = current.groups + (token to held.copy(members = held.members + 1)),
+            ) to token
+        }
+        Receipt(group, id, clock)
+    }
+
+    // A flight must replay the original throwable, including cancellation.
+    @Suppress("TooGenericExceptionCaught")
+    fun settle(receipt: Receipt, load: () -> Either<KeyError, DataKey>): Either<KeyError, Unit> =
+        active.locally(active.get() + receipt.group) {
+            resourceScope {
+                val token = Any()
+                val id = Any()
+                var failed: Throwable? = null
+                var transferred: DataKey? = null
+                onRelease { _ -> finishLoader(receipt.group, token, failed) }
+                onRelease { _ -> if (state.peek().records[id] == null) transferred?.material?.fill(0) }
+                try {
+                    val group = state.modify { current ->
+                        val held = current.groups[receipt.group] ?: retired()
+                        if (held.outcome != null) current to held
+                        else {
+                            check(held.loader == null) { "the key load is already running" }
+                            current.copy(groups = current.groups + (receipt.group to held.copy(loader = token))) to held
+                        }
+                    }
+                    group.outcome?.let { return@resourceScope replay(it).map { Unit } }
+                    val loaded = load()
+                    if (loaded is Either.Right) transferred = loaded.value
+                    val result = loaded.flatMap { key ->
+                        val identity = group.key.identity
+                        if (identity == null) Either.Right(SourceRef(id, Legacy(key)))
+                        else OwnedKeyMaterial.take(identity, key, group.deadline) {
+                            state.update { it.copy(records = it.records - id) }
+                        }.map { SourceRef(id, Qualified(it)) }
+                    }
+                    state.update { current ->
+                        val held = checkNotNull(current.groups[receipt.group])
+                        val source = result.getOrNull()
+                        current.copy(
+                            open = current.open.filterValues { it !== receipt.group },
+                            groups = current.groups + (receipt.group to held.copy(outcome = Value(result))),
+                            records = if (source == null) current.records else current.records + (id to source),
+                        )
+                    }
+                    result.map { Unit }
+                } catch (failure: Throwable) {
+                    failed = failure
+                    throw failure
+                }
+            }
+        }
+
+    private fun finishReceipt(id: Any) = resourceScope {
+        val group = state.peek().receipts[id] ?: return@resourceScope
+        val intent = ReleaseIntent { releaseGroup(group) }
+        onRelease { _ -> drain() }
+        state.update { current ->
+            val held = current.groups[group] ?: return@update current
+            if (current.receipts[id] !== group) return@update current
+            collect(
+                current.copy(
+                    receipts = current.receipts - id,
+                    groups = current.groups + (group to held.copy(members = held.members - 1)),
+                ),
+                group, intent,
+            )
+        }
+    }
+
+    private fun finishLoader(id: Any, token: Any, failure: Throwable?) = resourceScope {
+        val intent = ReleaseIntent { releaseGroup(id) }
+        onRelease { _ -> drain() }
+        state.update { current ->
+            val held = current.groups[id] ?: return@update current
+            val unclaimedFailure = held.loader == null && held.outcome == null && failure != null
+            if (held.loader !== token && !unclaimedFailure) {
+                return@update current
+            }
+            val outcome = held.outcome ?: Thrown(checkNotNull(failure))
+            collect(
+                current.copy(
+                    open = current.open.filterValues { it !== id },
+                    groups = current.groups + (id to held.copy(loader = null, outcome = outcome)),
+                ),
+                id, intent,
+            )
+        }
+    }
+
+    private fun collect(current: State, id: Any, intent: ReleaseIntent): State {
+        val group = checkNotNull(current.groups[id])
+        if (group.members != 0 || group.loader != null || group.releasing) return current
+        if ((group.outcome as? Value)?.result?.getOrNull() == null) {
+            return current.copy(open = current.open.filterValues { it !== id }, groups = current.groups - id)
+        }
+        return current.copy(
+            groups = current.groups + (id to group.copy(releasing = true)), pending = current.pending + intent,
+        )
+    }
+
+    private fun releaseGroup(id: Any) {
+        val ref = ((state.peek().groups[id]?.outcome as? Value)?.result?.getOrNull()) ?: return
+        when (val source = ref.source) {
+            is Legacy -> source.key.material.fill(0)
+            is Qualified -> source.material.forget()
+        }
+        state.update { current ->
+            current.copy(
+                groups = current.groups - id,
+                records = if (ref.source is Legacy) current.records - ref.id else current.records,
+            )
+        }
+    }
+
+    private fun replay(outcome: Outcome): Either<KeyError, SourceRef> = when (outcome) {
+        is Value -> outcome.result
+        is Thrown -> throw outcome.failure
+    }
+
+    private fun retired(): Nothing = throw CancellationException("the key load is no longer admitted")
 }
