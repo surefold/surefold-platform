@@ -1,9 +1,11 @@
 package io.github.matthewjones372.surefold.tenancy.crypto
 
+import io.github.matthewjones372.surefold.Shared
 import io.github.matthewjones372.surefold.SingleFlight
 import io.github.matthewjones372.surefold.clock
 import io.github.matthewjones372.surefold.fail.Either
 import io.github.matthewjones372.surefold.fail.right
+import io.github.matthewjones372.surefold.resourceScope
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration
@@ -84,4 +86,29 @@ class KeyCache(
     }
 
     private operator fun Instant.plus(duration: Duration): Instant = plus(duration.toJavaDuration())
+}
+
+/** Pending releases belonging to this cache's ownership protocol. */
+internal class KeyCacheLedger {
+    private class ReleaseIntent(val action: () -> Unit)
+    private data class State(val pending: List<ReleaseIntent> = emptyList())
+
+    private val state = Shared(State())
+
+    fun owe(action: () -> Unit) {
+        val intent = ReleaseIntent(action)
+        state.update { it.copy(pending = it.pending + intent) }
+    }
+
+    fun drain() = resourceScope {
+        val pending = state.peek().pending
+        pending.asReversed().forEach { intent ->
+            onRelease { _ ->
+                intent.action()
+                state.update { current ->
+                    current.copy(pending = current.pending.filterNot { it === intent })
+                }
+            }
+        }
+    }
 }
