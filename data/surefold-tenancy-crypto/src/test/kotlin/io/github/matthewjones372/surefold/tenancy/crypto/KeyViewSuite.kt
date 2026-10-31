@@ -326,6 +326,186 @@ object KeyViewSuite : Suite() {
             }
         }
 
+        test("forgotten held views keep the terminal notice pending") {
+            val notices = Shared(0)
+            withView(TestClock(Instant.EPOCH), onTerminal = { notices.update { it + 1 } }) { material, view, source ->
+                material.forget()
+                notices.peek() shouldBe 0
+                source.any { it != 0.toByte() } shouldBe true
+                view.using { "still owned" } shouldBe Either.Right("still owned")
+                notices.peek() shouldBe 0
+            }
+            notices.peek() shouldBe 1
+        }
+
+        test("last forgotten view notifies once after the source is wiped") {
+            val notices = Shared(0)
+            val seen = Shared<ByteArray?>(null)
+            withView(TestClock(Instant.EPOCH), onTerminal = {
+                checkNotNull(seen.peek()).all { it == 0.toByte() } shouldBe true
+                notices.update { it + 1 }
+            }) { material, view, source ->
+                seen.update { source }
+                material.forget()
+                view.close()
+                notices.peek() shouldBe 1
+                view.close()
+                material.forget()
+                notices.peek() shouldBe 1
+            }
+            notices.peek() shouldBe 1
+        }
+
+        test("revoked idle handles notify without waiting for their close") {
+            val notices = Shared(0)
+            withView(TestClock(Instant.EPOCH), onTerminal = { notices.update { it + 1 } }) { material, view, source ->
+                material.revoke()
+                source.all { it == 0.toByte() } shouldBe true
+                notices.peek() shouldBe 1
+                view.using { error("a revoked view must not enter") } shouldBe deniedView
+                view.close()
+                material.revoke()
+                notices.peek() shouldBe 1
+            }
+        }
+
+        test("revoked admitted work releases before the terminal notice") {
+            val notices = Shared(0)
+            val seen = Shared<ByteArray?>(null)
+            withView(TestClock(Instant.EPOCH), onTerminal = {
+                checkNotNull(seen.peek()).all { it == 0.toByte() } shouldBe true
+                notices.update { it + 1 }
+            }) { material, view, _ ->
+                view.using { working ->
+                    seen.update { working }
+                    material.revoke()
+                    notices.peek() shouldBe 0
+                    "revoked answer"
+                } shouldBe deniedView
+                notices.peek() shouldBe 1
+            }
+        }
+
+        test("a terminal notice throwing after its own commit remains pending") {
+            val attempts = Shared(0)
+            val present = Shared(true)
+            val removals = Shared(0)
+            val failure = IllegalStateException("synthetic notice")
+            withView(TestClock(Instant.EPOCH), onTerminal = {
+                val number = metrics.locally(NoMetrics) {
+                    if (present.modify { false to it }) removals.update { it + 1 }
+                    attempts.modify { it + 1 to it + 1 }
+                }
+                if (number == 1) throw failure
+            }) { material, view, source ->
+                material.forget()
+                shouldThrow<IllegalStateException>({ view.close() }) { (it === failure) shouldBe true }
+                source.all { it == 0.toByte() } shouldBe true
+                attempts.peek() shouldBe 1
+                view.close()
+                attempts.peek() shouldBe 2
+                removals.peek() shouldBe 1
+                view.close()
+                attempts.peek() shouldBe 2
+            }
+        }
+
+        test("a committed terminal acknowledgement survives instrumentation failure") {
+            val notices = Shared(0)
+            val failure = IllegalStateException("synthetic acknowledgement")
+            withView(TestClock(Instant.EPOCH), onTerminal = {
+                metrics.locally(NoMetrics) { notices.update { it + 1 } }
+            }) { material, view, _ ->
+                material.forget()
+                onCommittedStep(1, { throw failure }) {
+                    shouldThrow<IllegalStateException>({ view.close() }) { (it === failure) shouldBe true }
+                }
+                notices.peek() shouldBe 1
+                view.close()
+                material.forget()
+                notices.peek() shouldBe 1
+            }
+        }
+
+        test("a publication failure keeps terminal notice failure suppressed") {
+            val attempts = Shared(0)
+            val primary = IllegalStateException("synthetic publication")
+            val cleanup = IllegalStateException("synthetic notice")
+            withView(TestClock(Instant.EPOCH), onTerminal = {
+                val number = metrics.locally(NoMetrics) { attempts.modify { it + 1 to it + 1 } }
+                if (number == 1) throw cleanup
+            }) { material, view, source ->
+                view.close()
+                onCommittedStep(0, { throw primary }) {
+                    shouldThrow<IllegalStateException>({ material.forget() }) {
+                        (it === primary) shouldBe true
+                        it.suppressed.toList() shouldBe listOf(cleanup)
+                    }
+                }
+                source.all { it == 0.toByte() } shouldBe true
+                material.forget()
+                attempts.peek() shouldBe 2
+            }
+        }
+
+        test("a callback failure stays primary when its terminal notice rethrows it") {
+            val attempts = Shared(0)
+            val primary = IllegalStateException("synthetic callback")
+            withView(TestClock(Instant.EPOCH), onTerminal = {
+                val number = metrics.locally(NoMetrics) { attempts.modify { it + 1 to it + 1 } }
+                if (number == 1) throw primary
+            }) { material, view, _ ->
+                material.forget()
+                shouldThrow<IllegalStateException>({
+                    view.using {
+                        view.close()
+                        throw primary
+                    }
+                }) {
+                    (it === primary) shouldBe true
+                    it.suppressed.toList() shouldBe emptyList()
+                }
+                material.forget()
+                attempts.peek() shouldBe 2
+            }
+        }
+
+        test("a parallel acknowledgement survives another notice attempt failing") {
+            val attempts = Shared(0)
+            val entered = Promise<Nothing, Unit>()
+            val finish = Promise<Nothing, Unit>()
+            val failure = IllegalStateException("synthetic earlier notice")
+            withView(TestClock(Instant.EPOCH), onTerminal = {
+                val number = metrics.locally(NoMetrics) { attempts.modify { it + 1 to it + 1 } }
+                if (number == 1) {
+                    entered.succeed(Unit)
+                    finish.awaitValue()
+                    throw failure
+                }
+            }) { material, view, _ ->
+                material.forget()
+                clock.locally(SystemClock) {
+                    timeout(10.seconds) {
+                        scope {
+                            val first = async {
+                                shouldThrow<IllegalStateException>({ view.close() }) { (it === failure) shouldBe true }
+                            }
+                            try {
+                                entered.awaitValue()
+                                view.close()
+                                attempts.peek() shouldBe 2
+                            } finally {
+                                finish.succeed(Unit)
+                            }
+                            first.await()
+                        }
+                    }
+                }
+                view.close()
+                attempts.peek() shouldBe 2
+            }
+        }
+
         test("borrowing at the original deadline is refused") {
             val clock = TestClock(Instant.EPOCH)
             withView(clock) { material, _, _ ->
@@ -370,6 +550,7 @@ private val expiredView = Either.Left(KeyError.Unavailable("the key view has exp
 
 private fun <A> withView(
     clock: TestClock,
+    onTerminal: () -> Unit = {},
     block: (OwnedKeyMaterial, KeyView, ByteArray) -> A,
 ): A = resourceScope {
     val source = byteArrayOf(3, 4, 5)
@@ -377,6 +558,7 @@ private fun <A> withView(
     val identity = KeyIdentity(viewOwner, KeyPurpose.Enc, 1, byteArrayOf(1))
     val material = OwnedKeyMaterial.take(
         identity, DataKey(viewOwner, KeyPurpose.Enc, 1, source), Instant.EPOCH.plusSeconds(10),
+        onTerminal = onTerminal,
     ).required()
     onRelease { material.revoke() }
     val view = material.borrow(clock).required()

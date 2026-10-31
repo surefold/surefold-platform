@@ -11,11 +11,13 @@ internal class OwnedKeyMaterial private constructor(
     private val identity: KeyIdentity,
     private val source: ByteArray,
     private val hardDeadline: Instant,
+    private val onTerminal: () -> Unit,
 ) {
     private data class State(
         val retained: Boolean = true,
         val revoked: Boolean = false,
         val zeroed: Boolean = false,
+        val notified: Boolean = false,
         val views: Set<Any> = emptySet(),
         val uses: Map<Any, ByteArray?> = emptyMap(),
     )
@@ -44,17 +46,7 @@ internal class OwnedKeyMaterial private constructor(
 
     fun forget() = change { it.copy(retained = false) }
 
-    fun revoke() {
-        try {
-            state.update { it.copy(retained = false, revoked = true) }
-        } finally {
-            val current = state.peek()
-            if (current.revoked) {
-                source.fill(0)
-                current.uses.values.forEach { it?.fill(0) }
-            }
-        }
-    }
+    fun revoke() = change { it.copy(retained = false, revoked = true) }
 
     private fun <A> use(id: Any, clock: Clock, block: (ByteArray) -> A): Either<KeyError, A> = resourceScope {
         refused(clock, id)?.let { return@resourceScope Either.Left(it) }
@@ -92,29 +84,42 @@ internal class OwnedKeyMaterial private constructor(
 
     private fun change(update: (State) -> State) = modify { update(it) to Unit }
 
-    private fun <A> modify(update: (State) -> Pair<State, A>): A {
-        try {
-            return state.modify {
-                val (next, answer) = update(it)
-                next.copy(
-                    zeroed = next.zeroed ||
-                        (!next.retained && next.views.isEmpty() && next.uses.isEmpty()),
-                ) to answer
-            }
-        } finally {
-            if (state.peek().zeroed) source.fill(0)
+    private fun <A> modify(update: (State) -> Pair<State, A>): A = resourceScope {
+        onRelease { _ -> releaseTerminal() }
+        state.modify {
+            val (next, answer) = update(it)
+            next.copy(
+                zeroed = next.zeroed ||
+                    (!next.retained && next.views.isEmpty() && next.uses.isEmpty()),
+            ) to answer
+        }
+    }
+
+    private fun releaseTerminal() {
+        val current = state.peek()
+        if (current.zeroed || current.revoked) source.fill(0)
+        if (current.revoked) current.uses.values.forEach { it?.fill(0) }
+        val terminal = current.zeroed || (current.revoked && current.uses.isEmpty())
+        if (terminal && !current.notified) {
+            onTerminal()
+            state.update { it.copy(notified = true) }
         }
     }
 
     companion object {
         private val denied = KeyError.Denied("the key view is unavailable")
 
-        fun take(identity: KeyIdentity, key: DataKey, hardDeadline: Instant): Either<KeyError, OwnedKeyMaterial> {
+        fun take(
+            identity: KeyIdentity,
+            key: DataKey,
+            hardDeadline: Instant,
+            onTerminal: () -> Unit = {},
+        ): Either<KeyError, OwnedKeyMaterial> {
             if (identity.owner != key.owner || identity.purpose != key.purpose || identity.version != key.version) {
                 key.material.fill(0)
                 return Either.Left(KeyError.Invalid("the key metadata does not match"))
             }
-            return Either.Right(OwnedKeyMaterial(identity, key.material, hardDeadline))
+            return Either.Right(OwnedKeyMaterial(identity, key.material, hardDeadline, onTerminal))
         }
     }
 }
