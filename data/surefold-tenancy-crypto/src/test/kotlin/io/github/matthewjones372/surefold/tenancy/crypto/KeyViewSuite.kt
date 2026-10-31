@@ -1,0 +1,471 @@
+package io.github.matthewjones372.surefold.tenancy.crypto
+
+import io.github.matthewjones372.surefold.Counter
+import io.github.matthewjones372.surefold.Metrics
+import io.github.matthewjones372.surefold.NoMetrics
+import io.github.matthewjones372.surefold.Promise
+import io.github.matthewjones372.surefold.Shared
+import io.github.matthewjones372.surefold.SystemClock
+import io.github.matthewjones372.surefold.TestClock
+import io.github.matthewjones372.surefold.awaitValue
+import io.github.matthewjones372.surefold.clock
+import io.github.matthewjones372.surefold.fail.Either
+import io.github.matthewjones372.surefold.junit.Suite
+import io.github.matthewjones372.surefold.junit.shouldBe
+import io.github.matthewjones372.surefold.junit.shouldThrow
+import io.github.matthewjones372.surefold.metrics
+import io.github.matthewjones372.surefold.resourceScope
+import io.github.matthewjones372.surefold.scope
+import io.github.matthewjones372.surefold.tenancy.TenantId
+import io.github.matthewjones372.surefold.timeout
+import java.time.Instant
+import kotlin.time.Duration.Companion.seconds
+
+object KeyViewSuite : Suite() {
+    init {
+        test("identity equality owns the revision and compares its contents") {
+            val revision = byteArrayOf(1, 2, 3)
+            val identity = KeyIdentity(viewOwner, KeyPurpose.Enc, 1, revision)
+            val equal = KeyIdentity(viewOwner, KeyPurpose.Enc, 1, byteArrayOf(1, 2, 3))
+            val hash = identity.hashCode()
+
+            revision.fill(0)
+
+            identity shouldBe equal
+            identity.hashCode() shouldBe hash
+            identity.hashCode() shouldBe equal.hashCode()
+        }
+
+        test("every identity dimension distinguishes retained material") {
+            val identity = KeyIdentity(viewOwner, KeyPurpose.Enc, 1, byteArrayOf(1))
+            val different = listOf(
+                KeyIdentity(KeyOwner.Platform, KeyPurpose.Enc, 1, byteArrayOf(1)),
+                KeyIdentity(viewOwner, KeyPurpose.Bidx, 1, byteArrayOf(1)),
+                KeyIdentity(viewOwner, KeyPurpose.Enc, 2, byteArrayOf(1)),
+                KeyIdentity(viewOwner, KeyPurpose.Enc, 1, byteArrayOf(2)),
+            )
+
+            different.all { it != identity } shouldBe true
+        }
+
+        test("identity rejects empty revisions and nonpositive versions") {
+            shouldThrow<IllegalArgumentException> {
+                KeyIdentity(viewOwner, KeyPurpose.Enc, 1, byteArrayOf())
+            }
+            listOf(0, -1).forEach { version ->
+                shouldThrow<IllegalArgumentException>({
+                    KeyIdentity(viewOwner, KeyPurpose.Enc, version, byteArrayOf(1))
+                }) { it.message shouldBe "invalid key identity" }
+            }
+        }
+
+        test("identity text is fixed and reveals none of its fields") {
+            val first = KeyIdentity(viewOwner, KeyPurpose.Enc, 1, byteArrayOf(1, 2, 3))
+            val second = KeyIdentity(KeyOwner.Platform, KeyPurpose.Bidx, 71, byteArrayOf(94))
+
+            first.toString() shouldBe second.toString()
+            first.toString().contains("synthetic-view-owner") shouldBe false
+        }
+
+        test("normal use returns its answer and wipes its private working copy") {
+            val source = byteArrayOf(3, 4, 5)
+            val seen = Shared<ByteArray?>(null)
+            resourceScope {
+                onRelease { source.fill(0) }
+                val identity = KeyIdentity(viewOwner, KeyPurpose.Enc, 1, byteArrayOf(1))
+                val material = OwnedKeyMaterial.take(
+                    identity, DataKey(viewOwner, KeyPurpose.Enc, 1, source), viewDeadline,
+                ).required()
+                onRelease { material.revoke() }
+                val view = material.borrow(TestClock(Instant.EPOCH)).required()
+                onRelease { view.close() }
+
+                view.identity shouldBe identity
+                view.using { working ->
+                    seen.update { working }
+                    (working !== source && working.contentEquals(source))
+                } shouldBe Either.Right(true)
+
+                checkNotNull(seen.peek()).all { it == 0.toByte() } shouldBe true
+                source.any { it != 0.toByte() } shouldBe true
+                material.forget()
+                source.any { it != 0.toByte() } shouldBe true
+                view.close()
+                source.all { it == 0.toByte() } shouldBe true
+            }
+            source.all { it == 0.toByte() } shouldBe true
+        }
+
+        test("a held view refuses expiry before entering its callback") {
+            val clock = TestClock(Instant.EPOCH)
+            withView(clock) { _, view, _ ->
+                val entered = Shared(false)
+                clock.adjust(10.seconds)
+
+                view.using { entered.update { true } } shouldBe expiredView
+                entered.peek() shouldBe false
+            }
+        }
+
+        test("normal callback crossing the original deadline is refused and wiped") {
+            val clock = TestClock(Instant.EPOCH)
+            val seen = Shared<ByteArray?>(null)
+            withView(clock) { _, view, _ ->
+                view.using { working ->
+                    seen.update { working }
+                    clock.adjust(10.seconds)
+                    "synthetic answer"
+                } shouldBe expiredView
+
+                checkNotNull(seen.peek()).all { it == 0.toByte() } shouldBe true
+            }
+        }
+
+        test("revocation during an admitted callback refuses its normal answer") {
+            val clock = TestClock(Instant.EPOCH)
+            withView(clock) { material, view, source ->
+                view.using { working ->
+                    material.revoke()
+                    source.all { it == 0.toByte() } shouldBe true
+                    working.all { it == 0.toByte() } shouldBe true
+                    "synthetic answer"
+                } shouldBe deniedView
+            }
+        }
+
+        test("revoked forgotten views cannot enter and cannot be borrowed again") {
+            val clock = TestClock(Instant.EPOCH)
+            withView(clock) { material, view, _ ->
+                val entered = Shared(false)
+                material.forget()
+                material.revoke()
+
+                view.using { entered.update { true } } shouldBe deniedView
+                material.borrow(clock) shouldBe deniedView
+                entered.peek() shouldBe false
+            }
+        }
+
+        test("benign close permits an admitted normal answer and refuses later uses") {
+            withView(TestClock(Instant.EPOCH)) { material, view, source ->
+                material.forget()
+                view.using { working ->
+                    view.close()
+                    source.any { it != 0.toByte() } shouldBe true
+                    working.contentEquals(source) shouldBe true
+                    "synthetic answer"
+                } shouldBe Either.Right("synthetic answer")
+                source.all { it == 0.toByte() } shouldBe true
+
+                val entered = Shared(false)
+                view.using { entered.update { true } } shouldBe deniedView
+                entered.peek() shouldBe false
+            }
+        }
+
+        test("a view keeps its captured clock when the ambient clock is rebound") {
+            val captured = TestClock(Instant.EPOCH)
+            withView(captured) { _, view, _ ->
+                clock.locally(TestClock(Instant.EPOCH.plusSeconds(100))) {
+                    view.using { "synthetic answer" } shouldBe Either.Right("synthetic answer")
+                }
+                captured.adjust(10.seconds)
+                clock.locally(TestClock(Instant.EPOCH)) {
+                    view.using { "synthetic answer" } shouldBe expiredView
+                }
+            }
+        }
+
+        test("defects and interruption retain their identity and wipe working copies") {
+            listOf(IllegalStateException("synthetic marker"), InterruptedException("synthetic interrupt"))
+                .forEach { marker ->
+                    val seen = Shared<ByteArray?>(null)
+                    withView(TestClock(Instant.EPOCH)) { material, view, _ ->
+                        shouldThrow<Exception>({
+                            view.using { working ->
+                                seen.update { working }
+                                material.revoke()
+                                throw marker
+                            }
+                        }) { (it === marker) shouldBe true }
+                        checkNotNull(seen.peek()).all { it == 0.toByte() } shouldBe true
+                    }
+                }
+        }
+
+        test("terminal forgotten material cannot be borrowed or resurrected") {
+            val captured = TestClock(Instant.EPOCH)
+            withView(captured) { material, view, source ->
+                material.forget()
+                view.close()
+                material.forget()
+                view.close()
+
+                source.all { it == 0.toByte() } shouldBe true
+                material.borrow(captured) shouldBe deniedView
+                material.revoke()
+                material.revoke()
+            }
+        }
+
+        test("concurrent uses own distinct arrays while benign close waits for their release") {
+            concurrentViews(revoke = false)
+        }
+
+        test("revocation reaches all concurrently admitted working copies") {
+            concurrentViews(revoke = true)
+        }
+
+        test("a committed borrow with throwing instrumentation releases its unpublished view") {
+            val captured = TestClock(Instant.EPOCH)
+            withView(captured) { material, view, source ->
+                view.close()
+                val marker = IllegalStateException("synthetic instrumentation")
+                failingCommit(marker) {
+                    shouldThrow<IllegalStateException>({ material.borrow(captured) }) {
+                        (it === marker) shouldBe true
+                    }
+                }
+                material.forget()
+                source.all { it == 0.toByte() } shouldBe true
+            }
+        }
+
+        test("a committed use with throwing instrumentation releases its unpublished use") {
+            withView(TestClock(Instant.EPOCH)) { material, view, source ->
+                val entered = Shared(false)
+                val marker = IllegalStateException("synthetic instrumentation")
+                failingCommit(marker) {
+                    shouldThrow<IllegalStateException>({ view.using { entered.update { true } } }) {
+                        (it === marker) shouldBe true
+                    }
+                }
+                entered.peek() shouldBe false
+                material.forget()
+                view.close()
+                source.all { it == 0.toByte() } shouldBe true
+            }
+        }
+
+        test("borrow cleanup preserves the first instrumentation failure and suppresses the second") {
+            val captured = TestClock(Instant.EPOCH)
+            withView(captured) { material, view, source ->
+                view.close()
+                val first = IllegalStateException("synthetic admission")
+                val cleanup = IllegalStateException("synthetic cleanup")
+                failingCommits(listOf(first, cleanup)) {
+                    shouldThrow<IllegalStateException>({ material.borrow(captured) }) {
+                        (it === first) shouldBe true
+                        it.suppressed.any { suppressed -> suppressed === cleanup } shouldBe true
+                    }
+                }
+                material.forget()
+                source.all { it == 0.toByte() } shouldBe true
+            }
+        }
+
+        test("closed view refusal takes priority over expiry") {
+            val captured = TestClock(Instant.EPOCH)
+            withView(captured) { _, view, _ ->
+                view.close()
+                captured.adjust(10.seconds)
+
+                view.using { error("a closed callback must not enter") } shouldBe deniedView
+            }
+        }
+
+        test("revoked view refusal takes priority over expiry") {
+            val captured = TestClock(Instant.EPOCH)
+            withView(captured) { material, view, _ ->
+                material.revoke()
+                captured.adjust(10.seconds)
+
+                view.using { error("a revoked callback must not enter") } shouldBe deniedView
+            }
+        }
+
+        test("revoked borrow refusal takes priority over expiry") {
+            val captured = TestClock(Instant.EPOCH)
+            withView(captured) { material, _, _ ->
+                material.revoke()
+                captured.adjust(10.seconds)
+
+                material.borrow(captured) shouldBe deniedView
+            }
+        }
+
+        test("expiry during use admission refuses before the callback") {
+            cutoffBeforeBody(commit = 0, revoke = false)
+        }
+
+        test("expiry during working-copy publication refuses before the callback") {
+            cutoffBeforeBody(commit = 1, revoke = false)
+        }
+
+        test("revocation during working-copy publication refuses before the callback") {
+            cutoffBeforeBody(commit = 1, revoke = true)
+        }
+
+        test("independent held views close without releasing each other's material") {
+            val captured = TestClock(Instant.EPOCH)
+            withView(captured) { material, first, source ->
+                resourceScope {
+                    val second = material.borrow(captured).required()
+                    onRelease { second.close() }
+                    first.close()
+                    first.close()
+
+                    second.using { it.contentEquals(source) } shouldBe Either.Right(true)
+                    material.forget()
+                    source.any { it != 0.toByte() } shouldBe true
+                    second.using { it.contentEquals(source) } shouldBe Either.Right(true)
+
+                    second.close()
+                    source.all { it == 0.toByte() } shouldBe true
+                }
+            }
+        }
+
+        test("borrowing at the original deadline is refused") {
+            val clock = TestClock(Instant.EPOCH)
+            withView(clock) { material, _, _ ->
+                clock.adjust(10.seconds)
+
+                material.borrow(clock) shouldBe expiredView
+            }
+        }
+
+        test("material transferred under mismatching metadata is refused and wiped") {
+            val identity = KeyIdentity(viewOwner, KeyPurpose.Enc, 1, byteArrayOf(1))
+            val mismatches = listOf(
+                Triple(KeyOwner.Platform, KeyPurpose.Enc, 1),
+                Triple(viewOwner, KeyPurpose.Bidx, 1),
+                Triple(viewOwner, KeyPurpose.Enc, 2),
+            )
+            mismatches.forEach { (owner, purpose, version) ->
+                val source = byteArrayOf(3, 4, 5)
+                resourceScope {
+                    onRelease { source.fill(0) }
+                    val result = OwnedKeyMaterial.take(identity, DataKey(owner, purpose, version, source), viewDeadline)
+                    if (result is Either.Right) onRelease { result.value.revoke() }
+
+                    (result is Either.Left && result.value is KeyError.Invalid) shouldBe true
+                    source.all { it == 0.toByte() } shouldBe true
+                }
+            }
+        }
+    }
+}
+
+private val viewOwner = KeyOwner.Tenant(TenantId("synthetic-view-owner"))
+private val viewDeadline: Instant = Instant.EPOCH.plusSeconds(3_600)
+
+private fun <A> Either<KeyError, A>.required(): A = when (this) {
+    is Either.Right -> value
+    is Either.Left -> error("a valid synthetic key was refused")
+}
+
+private val deniedView = Either.Left(KeyError.Denied("the key view is unavailable"))
+private val expiredView = Either.Left(KeyError.Unavailable("the key view has expired"))
+
+private fun <A> withView(
+    clock: TestClock,
+    block: (OwnedKeyMaterial, KeyView, ByteArray) -> A,
+): A = resourceScope {
+    val source = byteArrayOf(3, 4, 5)
+    onRelease { source.fill(0) }
+    val identity = KeyIdentity(viewOwner, KeyPurpose.Enc, 1, byteArrayOf(1))
+    val material = OwnedKeyMaterial.take(
+        identity, DataKey(viewOwner, KeyPurpose.Enc, 1, source), Instant.EPOCH.plusSeconds(10),
+    ).required()
+    onRelease { material.revoke() }
+    val view = material.borrow(clock).required()
+    onRelease { view.close() }
+    block(material, view, source)
+}
+
+private fun concurrentViews(revoke: Boolean) {
+    val copies = Shared<Map<Int, ByteArray>>(emptyMap())
+    val entered = List(2) { Promise<Nothing, Unit>() }
+    val release = Promise<Nothing, Unit>()
+    withView(TestClock(Instant.EPOCH)) { material, view, source ->
+        clock.locally(SystemClock) {
+            timeout(10.seconds) {
+                scope {
+                    val calls = (0..1).map { index ->
+                        async {
+                            view.using { working ->
+                                copies.update { it + (index to working) }
+                                entered[index].succeed(Unit)
+                                release.awaitValue()
+                                index
+                            }
+                        }
+                    }
+                    try {
+                        entered.forEach { it.awaitValue() }
+                        val actual = copies.peek()
+                        (actual[0] !== actual[1]) shouldBe true
+                        actual.values.all { it !== source && it.contentEquals(source) } shouldBe true
+                        material.forget()
+                        view.close()
+                        source.any { it != 0.toByte() } shouldBe true
+                        if (revoke) {
+                            material.revoke()
+                            actual.values.all { bytes -> bytes.all { it == 0.toByte() } } shouldBe true
+                        }
+                    } finally {
+                        release.succeed(Unit)
+                    }
+                    calls.forEachIndexed { index, call ->
+                        call.await() shouldBe if (revoke) deniedView else Either.Right(index)
+                    }
+                }
+            }
+        }
+        source.all { it == 0.toByte() } shouldBe true
+        copies.peek().values.all { bytes -> bytes.all { it == 0.toByte() } } shouldBe true
+    }
+}
+
+private fun <A> failingCommit(marker: IllegalStateException, block: () -> A): A =
+    failingCommits(listOf(marker), block)
+
+private fun <A> failingCommits(failures: List<IllegalStateException>, block: () -> A): A {
+    val calls = Shared(0)
+    val failing = object : Metrics by NoMetrics {
+        override fun counter(name: String, tags: Map<String, String>): Counter = Counter {
+            if (name == "surefold.transact.runs" && tags["outcome"] == "committed") {
+                val index = metrics.locally(NoMetrics) { calls.modify { it + 1 to it } }
+                if (index < failures.size) throw failures[index]
+            }
+        }
+    }
+    return metrics.locally(failing, block)
+}
+
+private fun cutoffBeforeBody(commit: Int, revoke: Boolean) {
+    val captured = TestClock(Instant.EPOCH)
+    val entered = Shared(false)
+    withView(captured) { material, view, _ ->
+        onCommittedStep(commit, {
+            if (revoke) material.revoke() else captured.adjust(10.seconds)
+        }) {
+            view.using { entered.update { true } } shouldBe if (revoke) deniedView else expiredView
+        }
+        entered.peek() shouldBe false
+    }
+}
+
+private fun <A> onCommittedStep(target: Int, action: () -> Unit, block: () -> A): A {
+    val calls = Shared(0)
+    val atCommit = object : Metrics by NoMetrics {
+        override fun counter(name: String, tags: Map<String, String>): Counter = Counter {
+            if (name == "surefold.transact.runs" && tags["outcome"] == "committed") {
+                val index = metrics.locally(NoMetrics) { calls.modify { it + 1 to it } }
+                if (index == target) metrics.locally(NoMetrics, action)
+            }
+        }
+    }
+    return metrics.locally(atCommit, block)
+}
