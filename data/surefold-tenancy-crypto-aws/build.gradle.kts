@@ -28,3 +28,11 @@ tasks.test {
         },
     )
 }
+
+// Opt-in real AWS proof; ordinary builds compile the harness but never invoke it.
+tasks.register<JavaExec>("kmsRegionalProof") {
+    dependsOn(tasks.testClasses)
+    classpath = sourceSets.test.get().runtimeClasspath
+    mainClass.set("io.github.matthewjones372.surefold.tenancy.crypto.aws.KmsRegionalProof")
+    args(providers.gradleProperty("kmsProofArgs").getOrElse("").split(' ').filter { it.isNotBlank() })
+}
