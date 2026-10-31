@@ -73,7 +73,7 @@ private fun unknownFailure(mutation: Boolean) =
     if (mutation) KeyFailureCode.UncertainMutation else KeyFailureCode.Unavailable
 
 /** Socket timeouts are lost replies; an SDK abort or an interrupted call retains cancellation semantics. */
-private tailrec fun propagateCancellation(thrown: Throwable?, seen: Set<Throwable> = emptySet()) {
+internal tailrec fun propagateCancellation(thrown: Throwable?, seen: Set<Throwable> = emptySet()) {
     if (thrown == null || thrown in seen) return
     thrown.nonFatalOrThrow()
     if (thrown is AbortedException || thrown is ClosedByInterruptException) throw thrown
