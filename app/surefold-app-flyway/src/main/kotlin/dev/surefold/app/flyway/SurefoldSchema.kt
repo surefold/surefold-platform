@@ -1,4 +1,4 @@
-package io.github.matthewjones372.surefold.app.flyway
+package dev.surefold.app.flyway
 
 /**
  * A Surefold data module's Flyway scripts, which its own jar ships, and the history table they keep: one per module,

@@ -1,15 +1,15 @@
-package io.github.matthewjones372.surefold.app.flyway
+package dev.surefold.app.flyway
 
 import dev.surefold.actor.journal.jdbc.Postgres
 import dev.surefold.actor.journal.jdbc.migrate
+import dev.surefold.app.Migrated
+import dev.surefold.app.single
+import dev.surefold.app.use
 import dev.surefold.junit.Suite
 import dev.surefold.junit.shouldBe
 import dev.surefold.junit.shouldContain
 import dev.surefold.junit.shouldNotBeNull
 import dev.surefold.junit.withClue
-import io.github.matthewjones372.surefold.app.Migrated
-import io.github.matthewjones372.surefold.app.single
-import io.github.matthewjones372.surefold.app.use
 import javax.sql.DataSource
 
 private const val SERVICE = "classpath:db/handover"

@@ -1,18 +1,18 @@
-package io.github.matthewjones372.surefold.app.flyway
+package dev.surefold.app.flyway
 
 import dev.surefold.actor.journal.jdbc.Postgres
+import dev.surefold.app.Migrated
+import dev.surefold.app.Module
+import dev.surefold.app.render
+import dev.surefold.app.single
+import dev.surefold.app.testApp
+import dev.surefold.app.use
 import dev.surefold.junit.Suite
 import dev.surefold.junit.shouldBe
 import dev.surefold.junit.shouldContain
 import dev.surefold.junit.shouldNotBeNull
 import dev.surefold.junit.shouldThrow
 import dev.surefold.junit.withClue
-import io.github.matthewjones372.surefold.app.Migrated
-import io.github.matthewjones372.surefold.app.Module
-import io.github.matthewjones372.surefold.app.render
-import io.github.matthewjones372.surefold.app.single
-import io.github.matthewjones372.surefold.app.testApp
-import io.github.matthewjones372.surefold.app.use
 import org.flywaydb.core.api.FlywayException
 import org.flywaydb.core.api.configuration.Configuration
 import org.flywaydb.database.postgresql.PostgreSQLConfigurationExtension

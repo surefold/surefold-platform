@@ -1,4 +1,4 @@
-package io.github.matthewjones372.surefold.app.flyway
+package dev.surefold.app.flyway
 
 import dev.surefold.junit.Suite
 import dev.surefold.junit.expect

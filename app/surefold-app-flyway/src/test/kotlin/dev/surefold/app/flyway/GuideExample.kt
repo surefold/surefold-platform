@@ -1,9 +1,9 @@
-package io.github.matthewjones372.surefold.app.flyway
+package dev.surefold.app.flyway
 
 // The example docs/flyway.md shows, from the imports down: FlywayGuideSuite holds the page to this file.
-import io.github.matthewjones372.surefold.app.Migrated
-import io.github.matthewjones372.surefold.app.Module
-import io.github.matthewjones372.surefold.app.single
+import dev.surefold.app.Migrated
+import dev.surefold.app.Module
+import dev.surefold.app.single
 import javax.sql.DataSource
 
 class OrderRepo(val source: DataSource)

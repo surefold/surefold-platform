@@ -1,12 +1,12 @@
-package io.github.matthewjones372.surefold.app.flyway
+package dev.surefold.app.flyway
 
 import dev.surefold.actor.journal.jdbc.Postgres
 import dev.surefold.actor.journal.jdbc.migrate
+import dev.surefold.app.single
+import dev.surefold.app.testApp
 import dev.surefold.junit.Suite
 import dev.surefold.junit.expect
 import dev.surefold.junit.shouldBe
-import io.github.matthewjones372.surefold.app.single
-import io.github.matthewjones372.surefold.app.testApp
 import java.io.File
 import javax.sql.DataSource
 
@@ -34,5 +34,5 @@ object FlywayGuideSuite : Suite() {
     }
 
     private const val EXAMPLE =
-        "app/surefold-app-flyway/src/test/kotlin/io/github/matthewjones372/surefold/app/flyway/GuideExample.kt"
+        "app/surefold-app-flyway/src/test/kotlin/dev/surefold/app/flyway/GuideExample.kt"
 }

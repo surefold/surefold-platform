@@ -1,4 +1,4 @@
-package io.github.matthewjones372.surefold.app.flyway
+package dev.surefold.app.flyway
 
 import javax.sql.DataSource
 

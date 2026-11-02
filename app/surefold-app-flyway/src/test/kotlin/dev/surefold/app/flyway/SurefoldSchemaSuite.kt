@@ -1,4 +1,4 @@
-package io.github.matthewjones372.surefold.app.flyway
+package dev.surefold.app.flyway
 
 import dev.surefold.actor.journal.jdbc.Postgres
 import dev.surefold.actor.journal.jdbc.migrate
