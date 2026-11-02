@@ -1,4 +1,4 @@
-package io.github.matthewjones372.surefold.jobs.load
+package dev.surefold.jobs.load
 
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
