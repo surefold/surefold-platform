@@ -34,7 +34,8 @@ GitHub Packages asks for a token even to read a public package: put a classic pe
 
 [Jobs](docs/jobs.md), [auth](docs/auth.md), [files](docs/files.md), [HTTP stores](docs/http-stores.md),
 [Postgres notifications](docs/postgres-notify.md), [tenancy](docs/tenancy.md),
-[tenancy crypto](docs/tenancy-crypto.md), [KMS operations](docs/kms-operations.md) and [Flyway](docs/flyway.md).
+[tenancy crypto](docs/tenancy-crypto.md), [KMS operations](docs/kms-operations.md), [flags per tenant](docs/flags-per-tenant.md)
+and [Flyway](docs/flyway.md).
 The example application is [surefold-bank](examples/surefold-bank).
 
 ## Depending on Surefold
