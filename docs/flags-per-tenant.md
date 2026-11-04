@@ -1,7 +1,7 @@
 # Flags per tenant from Postgres
 
-A flag declared with `surefold-openfeature`, as surefold-core's
-[feature flags guide](https://github.com/surefold/surefold-core/blob/main/docs/flags.md) shows, read per tenant
+A flag declared with `surefold-openfeature`, as surefold-integrations'
+[feature flags guide](https://github.com/surefold/surefold-integrations/blob/main/docs/flags.md) shows, read per tenant
 from a Postgres table.
 
 `surefold-openfeature-postgres`'s `PostgresFlags` reads flags from a table, one
