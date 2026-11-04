@@ -31,6 +31,8 @@ jobs:
     # release. Nothing else here writes to the repository.
     permissions:
       contents: write
+      # To ask whether build.yml has already passed on the commit being released.
+      actions: read
       packages: read
     # On the job rather than on the publish step: a tag gives axion a version with
     # no `-SNAPSHOT`, which is what makes Gradle's signing required, and `build`
@@ -45,7 +47,7 @@ jobs:
       ORG_GRADLE_PROJECT_githubPackagesUsername: ${{ github.actor }}
       ORG_GRADLE_PROJECT_githubPackagesPassword: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # axion reads the tag to decide the version, and a shallow clone has none.
           fetch-depth: 0
@@ -89,17 +91,52 @@ jobs:
             echo "tagged $commit as $tag"
           fi
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "25"
 
-      - uses: gradle/actions/setup-gradle@v4
+      # The same version as build.yml's: its cache entries are only read by a setup-gradle of the same
+      # protocol, and with v4 here every release compiled every module from nothing.
+      - uses: gradle/actions/setup-gradle@v6
 
       # The gates first. A release that has not passed them is a release nobody
-      # can withdraw. Two workers, as build.yml runs them (surefold-core's
-      # v0.10.1 and v0.11.0 failed with more).
-      - run: ./gradlew build --max-workers=2 --stacktrace
+      # can withdraw. build.yml runs the whole build on every push to main, so a
+      # commit it has passed has passed them, and the release does not run every
+      # test again. A run still going on the commit is waited for, and one that
+      # failed fails this. Only a commit main's build never saw, or one it was
+      # cancelled on, is built here.
+      - id: gates
+        name: Has build.yml passed on this commit?
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          sha=$(git rev-parse HEAD)
+          runs="repos/$REPO/actions/workflows/build.yml/runs?head_sha=$sha&branch=main&per_page=100"
+          deadline=$(( $(date +%s) + 30 * 60 ))
+          while :; do
+            # A push to main and a manual run on it build everything.
+            states=$(gh api "$runs" --jq '.workflow_runs[]
+              | select(.head_branch == "main" and (.event == "push" or .event == "workflow_dispatch"))
+              | "\(.status)/\(.conclusion)"')
+            echo "build.yml on $sha: ${states:-no runs}"
+            if echo "$states" | grep -qx 'completed/success'; then
+              echo "passed=true" >> "$GITHUB_OUTPUT"; exit 0
+            fi
+            if echo "$states" | grep -qx 'completed/failure'; then
+              echo "main's build failed on $sha; fix main before releasing it"; exit 1
+            fi
+            if [ -z "$states" ] || ! echo "$states" | grep -qv '^completed/'; then
+              echo "passed=false" >> "$GITHUB_OUTPUT"; exit 0
+            fi
+            [ "$(date +%s)" -lt "$deadline" ] || { echo "build.yml is still running on $sha after 30 minutes"; exit 1; }
+            sleep 30
+          done
+
+      # Two workers, as build.yml runs them (surefold-core's v0.10.1 and v0.11.0 failed with more).
+      - if: steps.gates.outputs.passed != 'true'
+        run: ./gradlew build --max-workers=2 --stacktrace
 
       # The last non-blank line's last word: `currentVersion` prints a banner too, and a
       # multi-line value is one GITHUB_OUTPUT refuses rather than truncates.
@@ -136,22 +173,10 @@ jobs:
           echo "released=$released" >> "$GITHUB_OUTPUT"
           echo "$version under dev.surefold on Central: $released"
 
-      # Every module's javadoc jar, six modules to a Gradle run. Dokka's worker
-      # process keeps the classes of each module it renders, and one run rendering
-      # all of them had the daemon killed mid-publish in surefold-core (v0.11.0,
-      # v0.12.0). A run of its own ends its workers; the publish below then finds
-      # every javadoc up to date.
-      - if: steps.already.outputs.released != 'yes'
-        name: Javadoc, six modules at a time
-        run: |
-          ./gradlew --stop
-          tasks=$(./gradlew --no-daemon -q tasks --all | grep -oE '^[a-z0-9-]+:dokkaGeneratePublicationHtml' | sort -u | sed 's/^/:/')
-          echo "$tasks" | xargs -n 6 ./gradlew --no-daemon --max-workers=2
-
       # Staged rather than released: the Portal is where somebody looks at what
-      # is about to become permanent and presses the button.
-      #
-      # dev.surefold only. The relocation POMs at io.github.matthewjones372 (spec 0277) were
+      # is about to become permanent and presses the button. The javadoc jars are
+      # empty (the root build says why), so there is no Dokka pass to run first.
+      # dev.surefold only: the relocation POMs at io.github.matthewjones372 (spec 0277) were
       # one release, 0.18.0, and that release already points every module at dev.surefold.
       - if: steps.already.outputs.released != 'yes'
         name: dev.surefold to Central
