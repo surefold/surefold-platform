@@ -1,5 +1,5 @@
-// A bank you can watch (spec 0094): accounts and transfers sharded across three nodes. An application, never
-// published. NoOtherDependenciesTest asserts the runtime classpath is exactly what is declared here.
+// A bank you can watch (spec 0094): keyed accounts and transfer sagas sharded across three nodes (specs 0299,
+// 0300). An application, never published. NoOtherDependenciesTest asserts the runtime classpath is exactly what is declared here.
 
 plugins {
     application
@@ -11,6 +11,8 @@ val surefoldIntegrations: String by rootProject.extra
 
 dependencies {
     implementation("dev.surefold:surefold-cluster:$surefoldCore")
+    // The transfer is a durable saga (spec 0299), each step an entityStep over a keyed account.
+    implementation("dev.surefold:surefold-cluster-saga:$surefoldCore")
     implementation("dev.surefold:surefold-actor-journal-jdbc:$surefoldCore")
     implementation("dev.surefold:surefold-app-liquibase:$surefoldIntegrations")
     // The journal in memory by default, or on Postgres with `--jdbc`.
