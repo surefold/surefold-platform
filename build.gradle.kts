@@ -126,6 +126,13 @@ val unpublished = setOf("surefold-bank") + benchmarkModules
 val surefoldCore: String = providers.gradleProperty("surefoldCore").get()
 val surefoldIntegrations: String = providers.gradleProperty("surefoldIntegrations").get()
 
+/** The integrations' modules this build takes, read from each module's build file: only integrations may serve them. */
+val fromIntegrations: Set<String> =
+    subprojects.flatMap { module ->
+        Regex(""""dev\.surefold:([\w-]+):\${'$'}surefoldIntegrations"""").findAll(module.buildFile.readText())
+            .map { it.groupValues[1] }.toList()
+    }.toSet()
+
 /** The upstream repositories settings.gradle.kts included from beside this checkout, whose projects replace the pins. */
 val fromSource: Set<String> = gradle.includedBuilds.map { it.projectDir.name }.toSet()
 
@@ -163,8 +170,6 @@ subprojects {
         // The upstream snapshots (surefold-core's spec 0281). GitHub Packages asks for a token even to read a public
         // package: a classic personal access token with read:packages, as `githubPackagesUsername` and
         // `githubPackagesPassword`. Not for an upstream checked out beside this one, whose source stands in for it.
-        // Integrations first: core published those modules too until surefold-core's spec 0302 removed them, and its
-        // copies of them must never stand in for the integrations' own.
         listOf("surefold-integrations", "surefold-core").filterNot { it in fromSource }.forEach { upstream ->
             maven {
                 name = upstream
@@ -173,7 +178,12 @@ subprojects {
                     username = providers.gradleProperty("githubPackagesUsername").orNull
                     password = providers.gradleProperty("githubPackagesPassword").orNull
                 }
-                content { includeGroup("dev.surefold") }
+                content {
+                    includeGroup("dev.surefold")
+                    // Core published the integrations' modules too until surefold-core's spec 0302 removed them,
+                    // and its copies, stale from then on, must never stand in for the integrations' own.
+                    if (upstream == "surefold-core") fromIntegrations.forEach { excludeModule("dev.surefold", it) }
+                }
             }
         }
     }
