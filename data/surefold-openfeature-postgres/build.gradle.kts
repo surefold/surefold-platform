@@ -16,7 +16,13 @@ dependencies {
     testImplementation("dev.surefold:surefold-stream-forks:$surefoldCore")
 }
 
+// Read at configuration time, so the configuration cache survives it.
+val repoRoot = rootProject.projectDir.absolutePath
+// The page GuideSuite holds to GuideExample.kt, declared so editing it re-runs the test.
+val guide = files(rootProject.layout.projectDirectory.file("docs/flags-per-tenant.md"))
+
 tasks.test {
+    inputs.files(guide).withPropertyName("guide")
     val mainRuntime = configurations.runtimeClasspath
     inputs.files(mainRuntime).withPropertyName("mainRuntimeClasspath")
     jvmArgumentProviders.add(
@@ -24,6 +30,7 @@ tasks.test {
             listOf(
                 "-Dsurefold.openfeature.postgres.runtimeClasspath=" +
                     mainRuntime.get().joinToString(File.pathSeparator) { it.name },
+                "-Dsurefold.openfeature.postgres.repoRoot=$repoRoot",
             )
         },
     )

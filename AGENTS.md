@@ -119,8 +119,8 @@ Work out which of these a change can break:
 
 The guides' fences are held to the code by suites that read the Markdown: `docs/jobs.md` (surefold-app-jobs),
 `auth.md` (surefold-auth), `files.md` (surefold-files-test), `http-stores.md` (surefold-idempotency),
-`postgres-notify.md` (surefold-postgres-notify), `tenancy.md` (surefold-tenancy-test) and `flyway.md`
-(surefold-app-flyway). A fence is found by the HTML comment above it, so keep the marker when editing an example, and
+`postgres-notify.md` (surefold-postgres-notify), `tenancy.md` (surefold-tenancy-test), `flags-per-tenant.md`
+(surefold-openfeature-postgres) and `flyway.md` (surefold-app-flyway). A fence is found by the HTML comment above it, so keep the marker when editing an example, and
 add one to a new complete example. Each module's `build.gradle.kts` declares the pages it reads as test inputs.
 
 Kover has a floor of 90% on `check`.
