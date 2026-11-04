@@ -28,8 +28,8 @@ same gates (detekt, `NoOtherDependenciesTest`, Kover at 90%). On top of those:
 - **`surefold-bom` names only what was tested** (spec 0306): exactly the core and integrations versions pinned in
   `gradle.properties` and built against here, plus this repository's modules. A module in the BOM that no test here
   depends on fails the build.
-- **surefold-bank is rewritten on the durable saga** (spec 0299) once a core snapshot with it exists: `Transfer.kt`
-  deleted, `Account.kt` on `keyed`, `SagaSuite` and `CrashSuite` passing.
+- **surefold-bank runs on the durable saga** (spec 0299): each account is `keyed` (spec 0300), each transfer a
+  `durableSaga` of two `entityStep`s, and a statement is folded from the account's own journal.
 - **Working across repositories:** check the repositories out side by side (`../surefold-core` and
   `../surefold-integrations`). The build includes
   the upstream ones it finds there, and Gradle uses their source in place of the pinned artifacts, so a change

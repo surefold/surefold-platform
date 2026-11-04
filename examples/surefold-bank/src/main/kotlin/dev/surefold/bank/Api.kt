@@ -88,17 +88,18 @@ internal class Api(
         return node.open(id, pence).or(503) { answer(200, BalanceBody(id, it)) }
     }
 
-    private fun account(id: String): Answer = node.statement(id).or(503) { statement ->
-        if (!statement.open) return@or failed(404, "no account $id")
+    private fun account(id: String): Answer {
+        val statement = node.statement(id)
+        if (!statement.open) return failed(404, "no account $id")
         val movements = statement.movements.map { MovementBody(it.transfer, it.pence) }
-        answer(200, AccountBody(id, statement.balance, movements))
+        return answer(200, AccountBody(id, statement.balance, movements))
     }
 
     private fun transfer(body: TransferBody): Answer {
         val from = body.from.takeIf(ids::matches) ?: return failed(400, "from names no account")
         val to = body.to.takeIf { ids.matches(it) && it != from } ?: return failed(400, "to names no other account")
         val pence = body.amount.whole()?.takeIf { it > 0 } ?: return failed(400, "amount is more than 0")
-        if (node.statement(to).getOrNull()?.open != true) return failed(404, "no account $to")
+        if (!node.statement(to).open) return failed(404, "no account $to")
         val id = "t-${UUID.randomUUID()}"
         return node.transfer(id, from, to, pence).or(503) { answer(202, AcceptedBody(id)) }
     }
@@ -115,11 +116,8 @@ internal class Api(
         failed(404, "no node ${body.node} in this process")
     }
 
-    private fun status(id: String): Answer = node.status(id).or(503) { phase ->
-        if (phase ==
-            Phase.New.name
-        ) failed(404, "no transfer $id") else answer(200, StatusBody(id, phase))
-    }
+    private fun status(id: String): Answer =
+        node.status(id)?.let { phase -> answer(200, StatusBody(id, phase.name)) } ?: failed(404, "no transfer $id")
 
     private fun respond(exchange: HttpExchange, answer: Answer) =
         respond(exchange, answer.status, "application/json", json.encodeToString(answer.body).encodeToByteArray())

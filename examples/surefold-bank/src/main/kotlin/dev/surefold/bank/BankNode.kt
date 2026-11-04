@@ -1,11 +1,12 @@
 package dev.surefold.bank
 
 import dev.surefold.Promise
+import dev.surefold.Schedule
 import dev.surefold.actor.ActorRef
 import dev.surefold.actor.AskFailure
 import dev.surefold.actor.Journal
-import dev.surefold.actor.NotSent
-import dev.surefold.actor.Producer
+import dev.surefold.actor.KeyAnswer
+import dev.surefold.actor.Keyed
 import dev.surefold.actor.ask
 import dev.surefold.actor.journal
 import dev.surefold.actor.remote.node
@@ -19,11 +20,17 @@ import dev.surefold.cluster.MemberEvent
 import dev.surefold.cluster.Sharded
 import dev.surefold.cluster.Status
 import dev.surefold.cluster.cluster
+import dev.surefold.cluster.saga.Durable
+import dev.surefold.cluster.saga.Sagas
+import dev.surefold.cluster.saga.on
 import dev.surefold.cluster.sharding
 import dev.surefold.cluster.topic
 import dev.surefold.fail.Either
+import dev.surefold.fail.attempt
+import dev.surefold.fail.bind
 import dev.surefold.increment
 import dev.surefold.metrics
+import dev.surefold.retrying
 import dev.surefold.scope
 import java.util.concurrent.TimeoutException
 import kotlin.time.Duration
@@ -35,36 +42,23 @@ import kotlin.time.Duration.Companion.seconds
 internal data class Settings(
     val gossiping: Gossiping = Gossiping(probeEvery = 1.seconds, ackWithin = 500.milliseconds, formAfter = 2.seconds),
     val downAfter: Duration = 3.seconds,
-    val resendAfter: Duration = 1.seconds,
     val passivateAfter: Duration = 2.minutes,
     val sampleEvery: Duration = 1.seconds,
     val loadEvery: Duration = 20.milliseconds,
 )
 
-/** Commands a producer may keep unconfirmed: enough that a load never waits on one. */
-private const val KEEP = 100_000
-
-/** One node's two durable producers: debits and credits to accounts, and starts and answers to transfers. */
-private class Outbox(val accounts: Producer<AccountMsg>, val transfers: Producer<TransferMsg>) {
-    fun toAccount(id: String, command: AccountMsg) =
-        check(accounts.send(id) { ToAccount(command, it) }.isRight()) { "no room to send $command to $id" }
-
-    fun toTransfer(id: String, command: TransferMsg) =
-        check(transfers.send(id) { ToTransfer(command, it) }.isRight()) { "no room to send $command to $id" }
-}
-
 private class Parts(
     val cluster: Cluster,
     val accounts: Sharded<AccountMsg>,
-    val transfers: Sharded<TransferMsg>,
-    val outbox: Outbox,
+    val transfers: Sagas<Move, Refusal, Long>,
+    val journal: Journal,
     val load: ActorRef<Load>,
 )
 
 /**
- * One node of the bank, on a thread of its own until [close]: a cluster member with the accounts and transfers
- * sharded on it. Its producers are durable, so when a node crashes the cluster resumes what it kept (spec 0099).
- * [close] goes as a crash does: it leaves and drains nothing.
+ * One node of the bank, on a thread of its own until [close]: a cluster member with the keyed accounts and the
+ * transfer sagas sharded on it (specs 0299, 0300). A saga's steps are journalled, so when a node crashes the cluster
+ * resumes its transfers elsewhere. [close] goes as a crash does: it leaves and drains nothing.
  */
 internal class BankNode(
     val name: String,
@@ -72,7 +66,7 @@ internal class BankNode(
     seeds: Discovery,
     journal: Journal,
     settings: Settings = Settings(),
-    ended: (String, Saga) -> Unit = { _, _ -> },
+    ended: (String, Ended) -> Unit = { _, _ -> },
 ) : AutoCloseable {
     val members = Members()
 
@@ -85,7 +79,7 @@ internal class BankNode(
         metrics.locally(recorder) { run(port, seeds, journal, settings, ended) }
     }
 
-    private fun run(port: Int, seeds: Discovery, journal: Journal, settings: Settings, ended: (String, Saga) -> Unit) {
+    private fun run(port: Int, seeds: Discovery, journal: Journal, settings: Settings, ended: (String, Ended) -> Unit) {
         scope {
             journal(journal)
             val downing = Downing.keepMajority(stableAfter = settings.downAfter)
@@ -97,20 +91,16 @@ internal class BankNode(
             events.subscribe(dashboard)
             spawn("sampler", sampler(name, recorder, stats, settings.sampleEvery))
             val load = spawn("load", load(this@BankNode, settings.loadEvery))
-            val announce = { id: String, saga: Saga ->
-                val ms = System.currentTimeMillis() - saga.at
-                recorder.counter(ENDED, mapOf("outcome" to saga.phase.name)).increment()
+            val announce = { id: String, end: Ended ->
+                val ms = System.currentTimeMillis() - end.move.at
+                recorder.counter(ENDED, mapOf("outcome" to end.phase.name)).increment()
                 recorder.histogram(TOOK, emptyMap()).record(ms.toDouble())
-                events.publish(BankEvent.Ended(id, saga.from, saga.to, saga.pence, saga.phase.name, ms))
-                ended(id, saga)
+                val move = end.move
+                events.publish(BankEvent.Ended(id, move.from, move.to, move.pence, end.phase.name, ms))
+                ended(id, end)
             }
-            val outbox = Promise<Nothing, Outbox>("bank.outbox")
-            val accounts = cluster.sharding("account", AccountCodec, settings.passivateAfter) { id ->
-                account(id) { transfer, answer -> outbox.awaitValue().toTransfer(transfer, answer) }
-            }
-            val transfers = cluster.sharding("transfer", TransferCodec, settings.passivateAfter) { id ->
-                transfer(id, { account, command -> outbox.awaitValue().toAccount(account, command) }, announce)
-            }
+            val accounts = cluster.sharding("account", AccountCodec, settings.passivateAfter, entity = ::account)
+            val transfers = transfers(accounts, announce).on(cluster, settings.passivateAfter)
 
             val watcher = members.subscriber { event, seen ->
                 // One member tells the dashboards each change: the oldest that every other can reach.
@@ -120,13 +110,7 @@ internal class BankNode(
             }
             cluster.subscribe(spawn("members", watcher))
             members.await(1.minutes) { seen -> seen.members[cluster.self]?.status == Status.Up }
-            outbox.succeed(
-                Outbox(
-                    accounts.reliable(PRODUCER, settings.resendAfter, KEEP, durable = true),
-                    transfers.reliable(PRODUCER, settings.resendAfter, KEEP, durable = true),
-                ),
-            )
-            started.succeed(Parts(cluster, accounts, transfers, outbox.awaitValue(), load))
+            started.succeed(Parts(cluster, accounts, transfers, journal, load))
             done.awaitValue()
         }
     }
@@ -134,19 +118,38 @@ internal class BankNode(
     private val parts: Parts
         get() = started.awaitValue(within = 1.minutes) ?: throw TimeoutException("bank-$name did not start")
 
-    fun open(account: String, pence: Long): Either<AskFailure, Long> =
-        parts.accounts.entity(account).ask(ASK) { Open(pence, it) }
-
-    fun statement(account: String): Either<AskFailure, Statement> =
-        parts.accounts.entity(account).ask(ASK) { Balance(it) }
-
-    /** Starts the transfer [id] once its start is kept in this node's journal: from then on no crash loses it. */
-    fun transfer(id: String, from: String, to: String, pence: Long): Either<NotSent, Unit> {
-        val at = System.currentTimeMillis()
-        return parts.outbox.transfers.send(id) { ToTransfer(Start(from, to, pence, at), it) }
+    /** Opens [account] with [pence] unless it is open, and answers its balance. */
+    fun open(account: String, pence: Long): Either<AskFailure, Long> = attempt {
+        parts.accounts.entity(account)
+            .ask<AccountMsg, KeyAnswer<Refusal>>(ASK) { Keyed.Apply(OPENING_KEY, AccountCommand.Open(pence), it) }
+            .bind()
+        statement(account).balance
     }
 
-    fun status(id: String): Either<AskFailure, String> = parts.transfers.entity(id).ask(ASK) { Status(it) }
+    /** [account]'s statement, folded from its journal. */
+    fun statement(account: String): Statement = parts.journal.statement(account)
+
+    /**
+     * Starts the transfer [id], answering once its start is journalled: from then on no crash loses it. A start sent to
+     * a member that has just gone is sent again until its shard is up elsewhere; a second start of one id runs nothing.
+     */
+    fun transfer(id: String, from: String, to: String, pence: Long): Either<AskFailure, Unit> {
+        val move = Move(from, to, pence, System.currentTimeMillis())
+        return (Schedule.spaced<AskFailure>(START_AGAIN_AFTER) and Schedule.upTo(START)).retrying {
+            parts.transfers.start(id, move, within = ASK).bind()
+        }
+    }
+
+    /**
+     * Where the transfer [id] is, waiting up to [within] for it to end, so one ending as it is asked about is answered
+     * as ended: null for one nobody started.
+     */
+    fun status(id: String, within: Duration = STATUS_WITHIN): Phase? = when (parts.transfers.await(id, within)) {
+        is Durable.Outcome.Done -> Phase.Done
+        is Durable.Outcome.Refused -> Phase.Refused
+        Durable.Outcome.Running, is Durable.Outcome.Stuck -> Phase.Requested
+        Durable.Outcome.Forgotten -> null
+    }
 
     /** Starts or stops this node's load of random transfers. */
     fun load(on: Boolean) = parts.load.tell(if (on) Load.On else Load.Off)
@@ -168,7 +171,11 @@ internal class BankNode(
     private companion object {
         val ASK = 5.seconds
 
-        // One id on every node: the cluster names each node's outbox by its life, and resumes a gone life's.
-        const val PRODUCER = "bank"
+        // A start sent as a node goes waits for its transfer's shard to move to a member still up.
+        val START = 30.seconds
+        val START_AGAIN_AFTER = 250.milliseconds
+
+        // Long enough for an unknown id to be read as such, and for a transfer just ended to have its end written.
+        val STATUS_WITHIN = 1.seconds
     }
 }

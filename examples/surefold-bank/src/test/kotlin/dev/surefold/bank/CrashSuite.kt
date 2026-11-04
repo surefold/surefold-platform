@@ -1,6 +1,6 @@
 package dev.surefold.bank
 
-import dev.surefold.actor.NotSent
+import dev.surefold.actor.AskFailure
 import dev.surefold.actor.journal.jdbc.JdbcJournal
 import dev.surefold.actor.journal.jdbc.Postgres
 import dev.surefold.actor.remote.Node
@@ -22,17 +22,13 @@ import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
-/**
- * Brisk gossip, but resends no sooner than a resumed producer's. An entity answers each repeat by sending again,
- * so on a loaded machine a resend that beats the journal's round trip makes more writes: at 300 ms the test stalled.
- */
+/** Brisk gossip, so a crashed node is downed and its transfers resumed elsewhere within seconds. */
 internal val calm = Settings(
     gossiping = Gossiping(probeEvery = 500.milliseconds, ackWithin = 250.milliseconds, formAfter = 1.seconds),
-    resendAfter = 2.seconds,
 )
 
 /** Three nodes on one journal, each on its own thread, formed into a cluster before this returns. */
-internal fun threeNodes(settings: Settings = calm, ended: (String, Saga) -> Unit = { _, _ -> }): List<BankNode> {
+internal fun threeNodes(settings: Settings = calm, ended: (String, Ended) -> Unit = { _, _ -> }): List<BankNode> {
     val journal = JdbcJournal(Postgres.fresh())
     val ports = List(3) { freePort() }
     val seeds = ports.map { Node("", "127.0.0.1", it) }.let { Discovery { it } }
@@ -50,7 +46,7 @@ object CrashSuite : Suite() {
             timeout(120.seconds),
         ) {
             val ended = LinkedBlockingQueue<Pair<String, Phase>>()
-            val nodes = threeNodes { id, saga -> ended.put(id to saga.phase) }
+            val nodes = threeNodes { id, end -> ended.put(id to end.phase) }
             val (n1, n2, n3) = nodes
             try {
                 val accounts = List(20) { "a-$it" }
@@ -64,7 +60,7 @@ object CrashSuite : Suite() {
                 // One sender per node, all at once, so each node has work in flight when n3 goes halfway through its
                 // share.
                 val halfway = CountDownLatch(1)
-                val sent = ConcurrentLinkedQueue<Either<NotSent, Unit>>()
+                val sent = ConcurrentLinkedQueue<Either<AskFailure, Unit>>()
                 val senders = nodes.mapIndexed { n, node ->
                     Thread.ofPlatform().start {
                         transfers.filterIndexed { i, _ -> i % 3 == n }.forEachIndexed { i, (id, fromTo, pence) ->
@@ -88,7 +84,7 @@ object CrashSuite : Suite() {
                     .firstOrNull { it.size == transfers.size }
                 outcomes?.keys shouldBe transfers.map { it.first }.toSet()
                 outcomes?.values?.toSet() shouldBe setOf(Phase.Done, Phase.Refused)
-                accounts.sumOf { n1.statement(it).getOrNull()?.balance ?: 0 } shouldBe 20_000L
+                accounts.sumOf { n1.statement(it).balance } shouldBe 20_000L
             } finally {
                 nodes.forEach(BankNode::close)
             }
