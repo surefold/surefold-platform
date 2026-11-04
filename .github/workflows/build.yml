@@ -1,0 +1,68 @@
+name: build
+
+on:
+  # main only: a branch with a pull request open is already built by the
+  # pull_request event, and building it twice buys nothing.
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+# A push that lands while an earlier run is still going supersedes it. The
+# earlier answer is about code nobody has any more.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # surefold-core's and surefold-integrations' snapshots, pinned in gradle.properties, come from GitHub Packages.
+  packages: read
+
+jobs:
+  build:
+    # GitHub's runners, which cost nothing for a public repository, for every build, a fork's included.
+    runs-on: ubuntu-24.04
+    # A backstop behind the step's own limit below, for a hang outside it. GitHub's default is six hours.
+    timeout-minutes: 40
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # 25 is the toolchain and the floor: the first LTS where `synchronized` no longer pins a virtual
+        # thread's carrier, which a JDK 21 deadlock under load made a requirement.
+        include:
+          - java: "25"
+            gradleArgs: ""
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      # The whole build on every run, against the pinned upstream snapshots: CI never checks them out beside this
+      # repository, so what it tests is what the pins name. Two workers, as in surefold-core: four at once
+      # got the daemon OOM-killed there on a build with nothing cached.
+      - name: Build and test
+        timeout-minutes: 25
+        env:
+          ORG_GRADLE_PROJECT_githubPackagesUsername: ${{ github.actor }}
+          ORG_GRADLE_PROJECT_githubPackagesPassword: ${{ secrets.GITHUB_TOKEN }}
+        run: ./gradlew build ${{ matrix.gradleArgs }} --max-workers=2 --stacktrace
+
+      # The suites run an Api in memory and assert on which thread a body ran
+      # on, so a failure is worth reading rather than guessing at.
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-reports-java-${{ matrix.java }}
+          path: |
+            **/build/reports/tests/
+            **/build/test-results/
+          retention-days: 7

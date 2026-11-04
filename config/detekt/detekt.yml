@@ -1,0 +1,256 @@
+# detekt, layered on top of its default rule set (`buildUponDefaultConfig`).
+# Only the deviations are written here, so this file reads as a list of
+# decisions rather than a copy of somebody else's defaults.
+#
+# There is no free allowance to configure: detekt 2 fails the build on any
+# finding, which is what the `maxIssues: 0` this file used to carry was for.
+#
+# Two of those decisions are already made elsewhere: .editorconfig turns off
+# the ktlint rules for wildcard imports and for filenames, with the reasoning
+# beside them. They are turned off here too rather than fought twice.
+
+comments:
+  active: true
+  UndocumentedPublicClass:
+    active: false        # KDoc is prose here, and the reference manual carries the long form.
+  UndocumentedPublicFunction:
+    active: false
+
+complexity:
+  LongParameterList:
+    active: false
+  TooManyFunctions:
+    # Nine arities of a combinator, each in a form that names the executor its
+    # forks run on and one that does not, is thirty-six functions in a file
+    # that holds one idea. Splitting them by arity or by executor would put
+    # `parZip` in four places.
+    allowedFunctionsPerFile: 40
+    allowedFunctionsPerClass: 19
+    # `Schedule` is arrow-fx's combinator vocabulary — and, or, andThen, zipLeft,
+    # zipRight, map, collect, jittered — and a drop-in that offers half of it
+    # sends the caller back to the library it replaced.
+    allowedFunctionsPerInterface: 19
+    ignorePrivate: true
+    ignoreOverridden: true
+    ignoreDeprecated: true
+  CyclomaticComplexMethod:
+    allowedComplexity: 11
+    # A `when` that dispatches over a sealed hierarchy — Output, BodyInput — is
+    # one decision written out in full, and the compiler checks it is complete.
+    # Splitting one to lower a count would trade that exhaustiveness for the
+    # metric, so the branches of a simple dispatch count once.
+    ignoreSimpleWhenEntries: true
+  LongMethod:
+    active: false
+  NestedBlockDepth:
+    allowedDepth: 4
+
+exceptions:
+  TooGenericExceptionCaught:
+    # The one function that completes the stage from the virtual thread catches
+    # Throwable on purpose: an undeclared failure has to reach the interpreter
+    # as an exceptionally-completed stage rather than killing the thread.
+    # Resource.kt is the second: a release that throws must not strand the
+    # releases after it, so its throw is caught and suppressed onto the failure.
+    # Retry.kt is the third: a Schedule<Throwable, *> is asked about whatever the
+    # action threw, and `nonFatalOrThrow` puts back what must not be retried.
+    # MapParStage.kt is the fourth: an element body that ended its thread with a throw
+    # would leave `mapAsync` waiting on a stage nobody is left to complete.
+    # Defect.kt is the fifth: the one guard every stream operator runs caller code
+    # through catches whatever the caller did not declare, names it and rethrows it.
+    # Spans.kt is the sixth: a span records whatever the block did and rethrows
+    # it, and a span that ends Ok on a failure is worse than no span at all.
+    # Outcome.kt is the seventh: a surefold-structured fork holds whatever its body
+    # did until it is awaited, as a scope's does.
+    # Persistent.kt is the eighth: a snapshot store may throw anything, and a save
+    # that fails is logged rather than failing a step whose events are written.
+    # Story.kt is the ninth: a step marks whatever its block threw as its failure
+    # and rethrows it, so the transcript says which step broke.
+    # Policy.kt is the tenth: a breaker is told what its call threw, and NonFatal
+    # and the breaker's own countsAsFailure decide whether it was a failure.
+    # Matchers.kt is the eleventh: shouldThrow is asked whether a block threw a
+    # given type, so it has to catch whatever the block threw to say what it was.
+    # SurefoldEngine.kt is the twelfth: whatever a test threw is that test's result.
+    # Transact.kt is the thirteenth: an effect queued with afterCommit runs after the commit,
+    # so one that throws must not stop the effects after it from running (spec 0211).
+    # JobRun.kt is the fourteenth: a job's handler or codec may throw anything, and what it threw is the job's
+    # retry or failure, never the worker's end; `nonFatalOrThrow` puts back what must not be caught (spec 0216).
+    # Saga.kt is the fifteenth: an undo that throws must not stop the undos after it, so its throw is caught and
+    # suppressed onto the saga's NotUndone (spec 0298).
+    # DurableSaga.kt is the sixteenth: an undo may throw anything, and what it threw is the saga's Stuck, kept as its
+    # cause, never a lost failure (spec 0299).
+    excludes: ['**/DurableSaga.kt', '**/Saga.kt', '**/JobRun.kt', '**/Transact.kt', '**/Scope.kt', '**/Resource.kt', '**/Retry.kt', '**/MapParStage.kt', '**/Defect.kt', '**/Spans.kt', '**/Outcome.kt', '**/Persistent.kt', '**/Story.kt', '**/Policy.kt', '**/Matchers.kt', '**/SurefoldEngine.kt']
+  SwallowedException:
+    excludes: ['**/test/**']
+
+naming:
+  MatchingDeclarationName:
+    # See .editorconfig: ResponseHeaders.kt holds ResponseHeader and the
+    # declarations that belong with it, which is the name a reader wants. The
+    # same in surefold-stream, where Stream.kt holds Stream and the operators that
+    # belong with it.
+    active: false
+  FunctionNaming:
+    # Test names are sentences in backticks.
+    excludes: ['**/test/**', '**/testFixtures/**']
+
+style:
+  AbstractClassCanBeInterface:
+    # `Output` is a sealed class with an `open val` carrying a default, and it
+    # is published API: turning it into an interface would change the ABI for
+    # anyone compiled against it, to save a keyword. If that trade is ever
+    # worth making it should be made deliberately, with a version bump, not by
+    # a lint rule.
+    active: false
+  UnusedImport:
+    # The other half of the no-wildcard rule: an explicit import list is only
+    # an inventory of what a file uses if the names it no longer uses are gone.
+    # ktlint removes them on `spotlessApply`; this fails the build for one that
+    # reached a commit anyway.
+    active: true
+  WildcardImport:
+    # A project principle: an explicit import list is the one place a reader
+    # sees where every name in a file comes from, and it is what keeps the
+    # documentation's examples honest — each one names exactly what it needs.
+    # `.editorconfig` tells ktlint and the IDE the same thing, so an
+    # optimize-imports cannot put one back.
+    active: true
+  MagicNumber:
+    # A status code in a test is the assertion, not a number needing a name.
+    # Single.kt is the arities: each overload reads its dependencies out of the
+    # list by the position its parameter sits in, and a named constant per
+    # position says less than the position does.
+    excludes: ['**/test/**', '**/testFixtures/**', '**/Single.kt']
+    ignorePropertyDeclaration: true
+    ignoreCompanionObjectPropertyDeclaration: true
+    ignoreNamedArgument: true
+    # HTTP status codes are a vocabulary rather than magic. RFC 9110 gives 404
+    # its meaning, and this library hands them to you as integers —
+    # `errorJson<ApiError>(404, ...)`, `ApiError(400, ...)`, `json<T>(201)`.
+    # A private NOT_FOUND const sitting beside a public parameter that takes
+    # 404 would read as though the two were different things. Every code below
+    # is one this codebase actually emits; anything else still has to earn a
+    # name.
+    # The codes below are the HTTP statuses a test fixture writes down as data;
+    # the list is shared across the family's builds rather than trimmed per repo.
+    ignoreNumbers: ['-1', '0', '1', '2', '100', '200', '201', '202', '203', '204', '205', '206', '301', '302',
+                    '304', '400', '401', '402', '403', '404', '405', '406', '408', '409', '410', '412', '413',
+                    '415', '422', '423', '428', '429', '451', '500', '501', '502', '503', '504']
+  ReturnCount:
+    # Four, because two functions here are lookups that answer as soon as they
+    # know — `Cors.preflight` and the codegen type mapper. Threading a nullable
+    # through to one exit would not make either clearer.
+    max: 4
+    excludeGuardClauses: true
+  ThrowsCount:
+    max: 3
+  MaxLineLength:
+    maxLineLength: 120
+    excludes: ['**/test/**/generated/**']
+  ForbiddenComment:
+    active: true
+    comments:
+      - reason: 'Unfinished work does not belong on main.'
+        value: 'TODO:'
+      - reason: 'Unfinished work does not belong on main.'
+        value: 'FIXME:'
+  UnusedParameter:
+    # `@ParameterizedTest(name = "{0}")` takes the case's label as its first
+    # parameter and uses it for the test name, not in the body. That is the
+    # whole of this rule's catch in the test sources.
+    excludes: ['**/test/**']
+  ForbiddenVoid:
+    # `ActorSystem<Void>` is Pekko's Java DSL, not our choice:
+    # `Behaviors.empty<Void>()` is how a guardian with no protocol is spelled.
+    excludes: ['**/pekko/**']
+  DestructuringDeclarationWithTooManyEntries:
+    # `handledNow { (a, b, c, d) -> }` destructures the endpoint's declared
+    # inputs. Six of them is a six-input endpoint.
+    maxDestructuringEntries: 6
+
+  # ---------------------------------------------------------------- functional
+  #
+  # The rules below are off in detekt's defaults and on here. They are what
+  # "written functionally" is checkable as: a value once bound stays bound,
+  # a function is an expression, and a lambda is not a place to hide a loop.
+  ExpressionBodySyntax:
+    active: true
+    includeLineWrapping: false
+  VarCouldBeVal:
+    active: true
+    ignoreLateinitVar: false
+  UnnecessaryLet:
+    active: true
+  UnnecessaryApply:
+    active: true
+  UnnecessaryFilter:
+    active: true
+  CollapsibleIfStatements:
+    active: true
+  UseIfEmptyOrIfBlank:
+    active: true
+  ForbiddenMethodCall:
+    # detekt 2 resolves the Kotlin stdlib again, so the mutable-collection ban
+    # this was written for could live here — but it does not, because the ban
+    # was never "no mutableListOf": a builder that fills a local list and hands
+    # back a read-only view is the shape half of `Endpoint.kt` is written in.
+    # Which mutation is local and which escapes is a question about the source,
+    # and FunctionalStyleTest is where that claim is made and checked.
+    active: true
+    methods:
+      - reason: 'Thread.sleep in library code turns a timeout into a stall; schedule instead.'
+        value: 'java.lang.Thread.sleep'
+      # Every builder below turns an absent value into a source with no elements, so a lookup that
+      # missed runs to Done having processed nothing. `Stream.fromStage` and `orFailIfEmpty` are what
+      # to write instead, and docs/stream.md ships this same list for a consumer to paste into theirs.
+      # The name alone is the match, and it covers every overload of it.
+      - reason: 'A stage that completes with null emits nothing: Stream.fromStage names the absence.'
+        value: 'org.apache.pekko.stream.javadsl.Source.completionStage'
+      - reason: 'The older name for the same builder, and the same null completion.'
+        value: 'org.apache.pekko.stream.javadsl.Source.fromCompletionStage'
+      - reason: 'The Scala half of it: a Future completed with null emits nothing either.'
+        value: 'org.apache.pekko.stream.javadsl.Source.future'
+      - reason: 'The older name for the Future form, with the same completion.'
+        value: 'org.apache.pekko.stream.javadsl.Source.fromFuture'
+      - reason: 'A java.util.stream over ofNullable or an empty Optional is a source of no elements.'
+        value: 'org.apache.pekko.stream.javadsl.Source.fromJavaStream'
+      - reason: 'An iterator over an empty Optional is a source of no elements.'
+        value: 'org.apache.pekko.stream.javadsl.Source.fromIterator'
+    # The example services sleep on purpose, to have something slow to stream,
+    # and the timing tests sleep to make a gap they can measure. Schedule.kt is
+    # where "schedule instead" lands: it holds the one sleep, waited out on the
+    # calling virtual thread so an interrupt ends the schedule where it is.
+    # SystemClock.sleep parks in Waiting.kt (spec 0042) rather than calling it,
+    # and everything else waits through whichever Clock the thread inherited.
+    excludes: ['**/test/**', '**/example/**']
+  # A second instance of the rule, for main and test sources alike: the first excludes tests, which may sleep.
+  ForbiddenMethodCall/runCatching:
+    active: true
+    methods:
+      - reason: 'runCatching catches every Throwable, interrupts and cancellations included, and turns a declared failure and a bug into one Result. Catch the exception you expect, by name.'
+        value: 'kotlin.runCatching'
+
+# ------------------------------------------------------------- what is meant
+#
+# Rules whose default answer is right in general and wrong for the one place
+# here that trips them. Each was read at every site it fired.
+
+coroutines:
+  InjectDispatcher:
+    # `withContext(Dispatchers.IO)` around the multipart parse is deliberate
+    # and explained where it happens: the parser is blocking, and the
+    # alternative is parking an engine thread. A library that took its
+    # dispatcher as a parameter would be asking every caller to answer a
+    # question only this file knows about.
+    active: false
+
+potential-bugs:
+  ImplicitDefaultLocale:
+    # Test fixtures that upper-case an ASCII name to spell a file name. No
+    # locale any of these tests runs in changes that answer, and naming one
+    # would be ceremony.
+    #
+    # This line was written for the benchmarks, which used to be tests here and
+    # formatted their own numbers with `"%8.0f".format(...)`. They are a JMH
+    # harness now and format nothing.
+    excludes: ['**/test/**']
