@@ -1,11 +1,12 @@
 // surefold-jobs on surefold-tenancy (spec 0225): each job's handler runs as the tenant its row names.
 // NoOtherDependenciesTest asserts the runtime classpath.
+val surefoldCore: String by rootProject.extra
 
 dependencies {
     api(project(":surefold-jobs"))
     api(project(":surefold-tenancy"))
 
-    testImplementation(testFixtures(project(":surefold-actor-journal-jdbc")))
+    testImplementation(testFixtures("dev.surefold:surefold-actor-journal-jdbc:$surefoldCore"))
     testImplementation("org.liquibase:liquibase-core:4.32.0")
 }
 

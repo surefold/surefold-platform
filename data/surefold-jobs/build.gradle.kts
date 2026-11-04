@@ -2,14 +2,15 @@
 // the DataSource is the service's, and a payload is its codec's text. A worker listens through
 // surefold-postgres-notify, run on surefold's own forks (spec 0238). NoOtherDependenciesTest asserts the runtime
 // classpath.
+val surefoldCore: String by rootProject.extra
 
 dependencies {
-    api(project(":surefold"))
+    api("dev.surefold:surefold:$surefoldCore")
     implementation(project(":surefold-postgres-notify"))
-    implementation(project(":surefold-stream-forks"))
+    implementation("dev.surefold:surefold-stream-forks:$surefoldCore")
 
     // A real Postgres, in a container, with the changelog applied as a service would.
-    testImplementation(testFixtures(project(":surefold-actor-journal-jdbc")))
+    testImplementation(testFixtures("dev.surefold:surefold-actor-journal-jdbc:$surefoldCore"))
     testImplementation("org.liquibase:liquibase-core:4.32.0")
 }
 

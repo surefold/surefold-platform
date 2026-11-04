@@ -9,15 +9,17 @@ plugins {
     `java-test-fixtures`
 }
 
+val surefoldCore: String by rootProject.extra
+
 dependencies {
-    api(project(":surefold"))
+    api("dev.surefold:surefold:$surefoldCore")
     api("software.amazon.awssdk:s3:$awsVersion") {
         exclude(group = "software.amazon.awssdk", module = "apache-client")
         exclude(group = "software.amazon.awssdk", module = "apache5-client")
         exclude(group = "software.amazon.awssdk", module = "netty-nio-client")
     }
     implementation("software.amazon.awssdk:url-connection-client:$awsVersion")
-    testFixturesApi(project(":surefold-junit"))
+    testFixturesApi("dev.surefold:surefold-junit:$surefoldCore")
 }
 
 tasks.test {

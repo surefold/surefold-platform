@@ -1,12 +1,13 @@
 // Idempotent requests on Postgres (spec 0226): the JDK's java.sql, surefold, and surefold-jobs for the prune of
 // expired keys. No driver and no pool: the DataSource is the service's. NoOtherDependenciesTest asserts the runtime
 // classpath.
+val surefoldCore: String by rootProject.extra
 
 dependencies {
-    api(project(":surefold"))
+    api("dev.surefold:surefold:$surefoldCore")
     api(project(":surefold-jobs"))
 
-    testImplementation(testFixtures(project(":surefold-actor-journal-jdbc")))
+    testImplementation(testFixtures("dev.surefold:surefold-actor-journal-jdbc:$surefoldCore"))
     // The guide's example limits its clients too.
     testImplementation(project(":surefold-ratelimit"))
     testImplementation("org.liquibase:liquibase-core:4.32.0")

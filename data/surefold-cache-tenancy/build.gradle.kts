@@ -1,7 +1,9 @@
 // A cache whose every entry is one tenant's (spec 0246): surefold-cache and surefold-tenancy, and nothing else.
 // NoOtherDependenciesTest asserts the runtime classpath.
+val surefoldCore: String by rootProject.extra
+
 dependencies {
-    api(project(":surefold-cache"))
+    api("dev.surefold:surefold-cache:$surefoldCore")
     api(project(":surefold-tenancy"))
 }
 

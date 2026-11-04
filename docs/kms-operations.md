@@ -1,7 +1,7 @@
 # Explicit AWS KMS operations
 
-From 0.18.0 (specs [0260](../specs/0260-explicit-kms-operations.md) and
-[0261](../specs/0261-aws-explicit-kms-operations.md)), in `dev.surefold:surefold-tenancy-crypto-aws:0.18.0`.
+From 0.18.0 (specs [0260](https://github.com/surefold/surefold-core/blob/main/specs/0260-explicit-kms-operations.md) and
+[0261](https://github.com/surefold/surefold-core/blob/main/specs/0261-aws-explicit-kms-operations.md)), in `dev.surefold:surefold-tenancy-crypto-aws:0.18.0`.
 Existing `Kms` and `AwsKms` remain unchanged.
 
 Construct `AwsKeyOperations(clients, creationClients, preferredDataRegion)` and use it as `KeyOperations`.

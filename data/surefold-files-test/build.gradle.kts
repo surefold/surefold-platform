@@ -1,12 +1,13 @@
 // MinIO in Testcontainers, for a service's own tests of what it stores (spec 0224), and where surefold-files' S3Files
 // is held to the contract its fake keeps. NoOtherDependenciesTest asserts the runtime classpath.
+val surefoldCore: String by rootProject.extra
 
 dependencies {
     api(project(":surefold-files"))
     api("org.testcontainers:testcontainers:2.0.5")
     testImplementation(testFixtures(project(":surefold-files")))
     // freePort(): a port below the ephemeral range, never handed out twice in a JVM (spec 0197).
-    testImplementation(testFixtures(project(":surefold-actor-remote")))
+    testImplementation(testFixtures("dev.surefold:surefold-actor-remote:$surefoldCore"))
 }
 
 tasks.test {

@@ -1,12 +1,14 @@
 // A cache told by Postgres when a value changed (spec 0246): surefold-cache and surefold-postgres-notify, and nothing
 // else. NoOtherDependenciesTest asserts the runtime classpath.
+val surefoldCore: String by rootProject.extra
+
 dependencies {
-    api(project(":surefold-cache"))
+    api("dev.surefold:surefold-cache:$surefoldCore")
     api(project(":surefold-postgres-notify"))
 
     // A run on surefold's own forks, against a real Postgres in a container.
-    testImplementation(project(":surefold-stream-forks"))
-    testImplementation(testFixtures(project(":surefold-actor-journal-jdbc")))
+    testImplementation("dev.surefold:surefold-stream-forks:$surefoldCore")
+    testImplementation(testFixtures("dev.surefold:surefold-actor-journal-jdbc:$surefoldCore"))
 }
 
 tasks.test {

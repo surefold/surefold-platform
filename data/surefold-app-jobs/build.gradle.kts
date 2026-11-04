@@ -1,15 +1,17 @@
 // surefold-app on surefold-jobs: a worker as a node, started after the migrations and closed on release.
 // NoOtherDependenciesTest asserts the runtime classpath is surefold-app and surefold-jobs, and nothing else: no
 // migration tool, so a service picks its own.
+val surefoldCore: String by rootProject.extra
+val surefoldIntegrations: String by rootProject.extra
 
 dependencies {
-    api(project(":surefold-app"))
+    api("dev.surefold:surefold-app:$surefoldCore")
     api(project(":surefold-jobs"))
 
     // The tests migrate with Liquibase, as docs/jobs.md does; a service may use either tool.
-    testImplementation(project(":surefold-app-liquibase"))
+    testImplementation("dev.surefold:surefold-app-liquibase:$surefoldIntegrations")
     // A real Postgres, in a container.
-    testImplementation(testFixtures(project(":surefold-actor-journal-jdbc")))
+    testImplementation(testFixtures("dev.surefold:surefold-actor-journal-jdbc:$surefoldCore"))
 }
 
 tasks.test {

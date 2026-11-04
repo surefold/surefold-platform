@@ -1,7 +1,9 @@
 // surefold-cache's shared layer on Redis, and invalidation over Redis pub/sub (spec 0246): surefold-cache and the
 // Lettuce client, with the Netty and Reactor it runs on. NoOtherDependenciesTest asserts the runtime classpath.
+val surefoldCore: String by rootProject.extra
+
 dependencies {
-    api(project(":surefold-cache"))
+    api("dev.surefold:surefold-cache:$surefoldCore")
     api("io.lettuce:lettuce-core:6.5.0.RELEASE")
 
     // A real Redis, in a container.

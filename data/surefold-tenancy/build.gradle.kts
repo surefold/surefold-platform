@@ -6,10 +6,12 @@ plugins {
     `java-test-fixtures`
 }
 
-dependencies {
-    api(project(":surefold"))
+val surefoldCore: String by rootProject.extra
 
-    testFixturesApi(testFixtures(project(":surefold-actor-journal-jdbc")))
+dependencies {
+    api("dev.surefold:surefold:$surefoldCore")
+
+    testFixturesApi(testFixtures("dev.surefold:surefold-actor-journal-jdbc:$surefoldCore"))
     testFixturesImplementation("org.liquibase:liquibase-core:4.32.0")
 }
 

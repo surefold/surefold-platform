@@ -1,12 +1,13 @@
 // Sessions and credentials (specs 0227 and 0228): surefold, the JDK's java.sql and crypto, and Bouncy Castle for
 // Argon2id, pure Java. No driver and no pool: the DataSource is the service's. NoOtherDependenciesTest asserts the
 // runtime classpath.
+val surefoldCore: String by rootProject.extra
 
 dependencies {
-    api(project(":surefold"))
+    api("dev.surefold:surefold:$surefoldCore")
     implementation("org.bouncycastle:bcprov-jdk18on:1.85")
 
-    testImplementation(testFixtures(project(":surefold-actor-journal-jdbc")))
+    testImplementation(testFixtures("dev.surefold:surefold-actor-journal-jdbc:$surefoldCore"))
     testImplementation("org.liquibase:liquibase-core:4.32.0")
 }
 

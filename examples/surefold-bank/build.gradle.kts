@@ -6,22 +6,25 @@ plugins {
     kotlin("plugin.serialization")
 }
 
+val surefoldCore: String by rootProject.extra
+val surefoldIntegrations: String by rootProject.extra
+
 dependencies {
-    implementation(project(":surefold-cluster"))
-    implementation(project(":surefold-actor-journal-jdbc"))
-    implementation(project(":surefold-app-liquibase"))
+    implementation("dev.surefold:surefold-cluster:$surefoldCore")
+    implementation("dev.surefold:surefold-actor-journal-jdbc:$surefoldCore")
+    implementation("dev.surefold:surefold-app-liquibase:$surefoldIntegrations")
     // The journal in memory by default, or on Postgres with `--jdbc`.
     implementation("org.postgresql:postgresql:42.7.7")
     implementation("com.zaxxer:HikariCP:7.1.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
 
     // A real Postgres, in a container.
-    testImplementation(testFixtures(project(":surefold-actor-journal-jdbc")))
+    testImplementation(testFixtures("dev.surefold:surefold-actor-journal-jdbc:$surefoldCore"))
     // The pages in a real headless Chromium: the only proof they work. 1.56 drives Chromium 141, build 1194.
     testImplementation("com.microsoft.playwright:playwright:1.56.0")
-    testImplementation(project(":surefold-assert"))
+    testImplementation("dev.surefold:surefold-assert:$surefoldCore")
     // freePort(): a port below the ephemeral range, never handed out twice in a JVM (spec 0197).
-    testImplementation(testFixtures(project(":surefold-actor-remote")))
+    testImplementation(testFixtures("dev.surefold:surefold-actor-remote:$surefoldCore"))
 }
 
 application {

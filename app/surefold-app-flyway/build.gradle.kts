@@ -1,15 +1,17 @@
 // surefold-app on Flyway Community (Apache-2.0): flyway-core, its Postgres support, and the JDK's javax.sql. No driver:
 // the DataSource is the application's, and so is what it connects to.
+val surefoldCore: String by rootProject.extra
+
 val flywayVersion = "13.9.0"
 
 dependencies {
-    api(project(":surefold-app"))
+    api("dev.surefold:surefold-app:$surefoldCore")
     api("org.flywaydb:flyway-core:$flywayVersion")
     implementation("org.flywaydb:flyway-database-postgresql:$flywayVersion")
 
     // A real Postgres, in a container.
-    testImplementation(testFixtures(project(":surefold-actor-journal-jdbc")))
-    testImplementation(project(":surefold-assert"))
+    testImplementation(testFixtures("dev.surefold:surefold-actor-journal-jdbc:$surefoldCore"))
+    testImplementation("dev.surefold:surefold-assert:$surefoldCore")
     // The data modules whose Flyway scripts SurefoldSchemaSuite holds equal to their Liquibase changelogs.
     testImplementation(project(":surefold-tenancy"))
     testImplementation(project(":surefold-tenancy-crypto"))
