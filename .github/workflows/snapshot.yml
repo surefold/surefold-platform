@@ -1,0 +1,89 @@
+name: snapshot
+
+# A snapshot of every push to main, and of a branch when dispatched from it, on
+# GitHub Packages, as surefold-core does (its spec 0281):
+# https://maven.pkg.github.com/surefold/surefold-platform, which surefold-bom
+# (surefold-core's spec 0306) will name with the upstream versions pinned here.
+# It does not expire, unlike Central's snapshot repository, so a version pinned
+# in a handoff keeps resolving. Releases stay on Central (release.yml).
+#
+# Consumers add that repository with a classic personal access token holding
+# only read:packages, since GitHub Packages asks for one even to read a public
+# package, and depend on the version this prints, e.g. `0.18.1-SNAPSHOT`.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+# One publish at a time, in push order: a later snapshot never lands under an earlier one.
+concurrency:
+  group: snapshot-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04
+
+    # No signing key: a snapshot does not have to be signed, and a job that does
+    # not hold the key cannot sign a release by mistake. The token is the
+    # workflow's own: it writes this repository's packages, and reads the
+    # surefold-core and surefold-integrations snapshots gradle.properties pins.
+    env:
+      ORG_GRADLE_PROJECT_githubPackagesUsername: ${{ github.actor }}
+      ORG_GRADLE_PROJECT_githubPackagesPassword: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The version is derived from the nearest `v` tag, and a shallow
+          # checkout has no tags to derive it from.
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # On a tagged commit axion gives a release version, which is release.yml's
+      # to publish. A push of one is skipped; a dispatch of one is a mistake.
+      - name: Only a snapshot
+        id: version
+        run: |
+          version=$(./gradlew -q currentVersion | awk 'NF { last = $NF } END { print last }')
+          echo "version: $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          case "$version" in
+            *-SNAPSHOT) echo "publish=true" >> "$GITHUB_OUTPUT" ;;
+            *) if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+                 echo "$version is not a snapshot; dispatch this from a branch"; exit 1
+               fi
+               echo "$version is a release; release.yml publishes it" ;;
+          esac
+
+      # A push to main has already passed the pull request's build, so this
+      # publishes without running the tests again.
+      - if: steps.version.outputs.publish == 'true'
+        run: ./gradlew publishAllPublicationsToGithubPackagesRepository --no-configuration-cache
+
+      # The spec's claim, checked where a consumer would check it: every module the
+      # build publishes has this version on GitHub Packages, so a module dropped
+      # from publishing fails here rather than in a service's build.
+      - if: steps.version.outputs.publish == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          missing=""
+          for module in $(./gradlew -q publishedModules); do
+            url="https://maven.pkg.github.com/surefold/surefold-platform/dev/surefold/$module/$VERSION/maven-metadata.xml"
+            code=$(curl -s -o /dev/null -w '%{http_code}' -u "${{ github.actor }}:$TOKEN" "$url")
+            echo "$module $VERSION: $code"
+            [ "$code" = 200 ] || missing="$missing $module"
+          done
+          [ -z "$missing" ] || { echo "not on GitHub Packages:$missing"; exit 1; }

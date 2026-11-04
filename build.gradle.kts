@@ -122,6 +122,12 @@ val benchmarkModules = setOf("surefold-jobs-load")
 // spec 0094).
 val unpublished = setOf("surefold-bank") + benchmarkModules
 
+// The modules a snapshot or a release publishes, one per line: snapshot.yml checks each is on GitHub Packages after.
+tasks.register("publishedModules") {
+    val names = subprojects.map { it.name }.filterNot { it in unpublished }.sorted()
+    doLast { names.forEach(::println) }
+}
+
 /** The upstream snapshots this build is pinned to (gradle.properties), or their source beside this checkout. */
 val surefoldCore: String = providers.gradleProperty("surefoldCore").get()
 val surefoldIntegrations: String = providers.gradleProperty("surefoldIntegrations").get()
