@@ -62,7 +62,6 @@ internal data class NodeStats(
     val p99Ms: Long,
     val shards: Long,
     val entities: Long,
-    val unconfirmed: Long,
     val deadLetters: Long,
 ) {
     fun json() = json.encodeToString(this)
@@ -111,7 +110,6 @@ internal fun sampler(node: String, recorder: Recorder, stats: Topic<NodeStats>, 
                 took.getOrNull((took.size * P99).toInt())?.roundToLong() ?: took.lastOrNull()?.roundToLong() ?: 0,
                 shards = recorder.gauged("surefold.sharding.shards").roundToLong(),
                 entities = recorder.gauged("surefold.sharding.entities").roundToLong(),
-                unconfirmed = recorder.gauged("surefold.delivery.unconfirmed").roundToLong(),
                 deadLetters = recorder.total("surefold.actor.dead_letters").roundToLong(),
             ),
         )
@@ -135,13 +133,13 @@ internal object NodeStatsCodec : MessageCodec<NodeStats> {
         out.string(message.at)
         listOf(
             message.transfersPerSecond, message.refused, message.p99Ms, message.shards, message.entities,
-            message.unconfirmed, message.deadLetters,
+            message.deadLetters,
         ).forEach(out::long)
     }
 
     override fun read(input: WireIn): NodeStats = NodeStats(
         input.string(), input.string(), input.long(), input.long(), input.long(), input.long(), input.long(),
-        input.long(), input.long(),
+        input.long(),
     )
 }
 

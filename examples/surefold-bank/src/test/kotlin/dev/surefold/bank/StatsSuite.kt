@@ -54,7 +54,7 @@ object StatsSuite : Suite() {
         }
 
         test("stats and events cross the wire as they were, and are written as the admin page reads them") {
-            val stats = NodeStats("n2", "2026-09-27T20:00:00Z", 212, 3, 41, 34, 1209, 7, 0)
+            val stats = NodeStats("n2", "2026-09-27T20:00:00Z", 212, 3, 41, 34, 1209, 0)
             val ended = BankEvent.Ended("t-1", "a-12", "a-40", 250, "Done", 18)
             NodeStatsCodec.outbox().run { decode(encode(stats)) } shouldBe stats
             val events = BankEventCodec.outbox()
@@ -64,7 +64,7 @@ object StatsSuite : Suite() {
 
             stats.json() shouldBe
                 """{"node":"n2","at":"2026-09-27T20:00:00Z","transfersPerSecond":212,"refused":3,""" +
-                """"p99Ms":41,"shards":34,"entities":1209,"unconfirmed":7,"deadLetters":0}"""
+                """"p99Ms":41,"shards":34,"entities":1209,"deadLetters":0}"""
             ended.event() shouldBe Event(
                 "transfer",
                 """{"id":"t-1","from":"a-12","to":"a-40","amount":250,"outcome":"Done","ms":18}""",

@@ -43,7 +43,6 @@ function table() {
       cell(n.status, `status ${n.status}`),
       cell(s.shards ?? "", "number"),
       cell(s.entities ?? "", "number"),
-      cell(s.unconfirmed ?? "", "number"),
       cell(s.deadLetters ?? "", "number"),
     );
     return row;
