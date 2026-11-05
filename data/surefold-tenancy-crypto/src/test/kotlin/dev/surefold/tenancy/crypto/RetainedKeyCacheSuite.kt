@@ -18,6 +18,7 @@ import dev.surefold.awaitValue
 import dev.surefold.clock
 import dev.surefold.fail.Either
 import dev.surefold.fail.attempt
+import dev.surefold.fixedClock
 import dev.surefold.junit.Suite
 import dev.surefold.junit.shouldBe
 import dev.surefold.junit.shouldBeLeft
@@ -618,7 +619,7 @@ internal object RetainedKeyDeliverySuite : Suite(concurrent = false, isolated = 
 object RetainedKeyCallersSuite : Suite(concurrent = false, isolated = true) {
     init {
         test("an accepted body owns its Resource release before call returns") {
-            val callers = KeyCallers()
+            val callers = KeyCallers(SingleFlight())
             val events = Shared(emptyList<String>())
             callers.call {
                 resourceScope {
@@ -633,7 +634,7 @@ object RetainedKeyCallersSuite : Suite(concurrent = false, isolated = true) {
         listOf(false, true).forEach { unwind ->
             test("an accepted caller stays held through body or Resource release: $unwind") {
                 val probe = PendingCallerProbe()
-                val callers = KeyCallers()
+                val callers = KeyCallers(SingleFlight())
                 val callback = HandoffDecision<Unit>()
                 val returned = HandoffDecision<Unit>()
                 scope {
@@ -655,7 +656,7 @@ object RetainedKeyCallersSuite : Suite(concurrent = false, isolated = true) {
         }
 
         test("a committed admission observer throw preserves original and runs no body") {
-            val callers = KeyCallers()
+            val callers = KeyCallers(SingleFlight())
             val marker = IllegalStateException("synthetic admission observer")
             val body = HandoffDecision<Unit>()
             atDeliveryCommit({ stack -> stack.any { it.methodName == "admit" } }, { throw marker }) {
@@ -680,7 +681,7 @@ object RetainedKeyCallersSuite : Suite(concurrent = false, isolated = true) {
         }
 
         test("a suppression-disabled original retains identity and all ordered release attempts") {
-            val callers = KeyCallers()
+            val callers = KeyCallers(SingleFlight())
             val primary = object : Throwable("synthetic caller", null, false, false) {}
             val first = IllegalStateException("synthetic outer release")
             val second = IllegalStateException("synthetic inner release")
@@ -705,7 +706,7 @@ object RetainedKeyCallersSuite : Suite(concurrent = false, isolated = true) {
         }
 
         test("a release failure after normal body remains the original failure") {
-            val callers = KeyCallers()
+            val callers = KeyCallers(SingleFlight())
             val primary = IllegalStateException("synthetic release")
             val exits = Shared(emptyList<ExitCase>())
             shouldThrow<IllegalStateException>({
@@ -722,7 +723,7 @@ object RetainedKeyCallersSuite : Suite(concurrent = false, isolated = true) {
         }
 
         test("an opaque Fail crosses caller and foreign attempt with cleanup intact") {
-            val callers = KeyCallers()
+            val callers = KeyCallers(SingleFlight())
             val error = IllegalArgumentException("synthetic declared error")
             val prior = IllegalStateException("synthetic prior diagnostic")
             val first = IllegalStateException("synthetic outer release")
@@ -776,7 +777,7 @@ object RetainedKeyCallersSuite : Suite(concurrent = false, isolated = true) {
         }
 
         test("call refusal preserves an already entered step and interrupt flag") {
-            val callers = KeyCallers()
+            val callers = KeyCallers(SingleFlight())
             val thread = Thread.currentThread()
             val before = thread.isInterrupted
             val value = Shared(0)
@@ -801,7 +802,7 @@ object RetainedKeyCallersSuite : Suite(concurrent = false, isolated = true) {
         }
 
         test("caller failure preserves a cyclic existing suppressed graph") {
-            val callers = KeyCallers()
+            val callers = KeyCallers(SingleFlight())
             val primary = IllegalStateException("synthetic primary")
             val nested = IllegalStateException("synthetic nested")
             val release = IllegalStateException("synthetic release")
@@ -952,6 +953,322 @@ object RetainedKeyCallersSuite : Suite(concurrent = false, isolated = true) {
                     it.sleepers() shouldBe 0
                 }
             }
+        }
+    }
+}
+
+object RetainedKeyCallersCloseSuite : Suite(concurrent = false, isolated = true) {
+    init {
+        listOf(false, true).forEach { stop ->
+            test("atomic caller fence captures late admission and cleans up after assertion: $stop") {
+                val probe = CallerFenceProbe()
+                val callers = KeyCallers(SingleFlight())
+                val start = TestClock(Instant.EPOCH)
+                val hold = TestClock(Instant.EPOCH)
+                val entered = Promise<Nothing, Unit>()
+                val returned = HandoffDecision<Unit>()
+                val marker = AssertionError("synthetic held-caller admission assertion")
+                scope {
+                    resourceScope {
+                        onRelease { _ ->
+                            start.adjust(1.seconds)
+                            hold.adjust(1.seconds)
+                        }
+                        val late = async {
+                            start.sleep(1.seconds)
+                            callers.call {
+                                entered.succeed(Unit)
+                                hold.sleep(1.seconds)
+                            }
+                        }
+                        eventually(5.seconds) { start.sleepers() shouldBe 1 }
+                        val exercise = {
+                            withCallerFenceContention(
+                                probe, {
+                                    val stack = probe.target.awaitValue().stackTrace
+                                    stack.any { it.methodName == "fence" } shouldBe true
+                                    stack.any { it.methodName == "closeAndAwait" } shouldBe true
+                                },
+                                interruptAfterPause = false,
+                                afterHolder = {
+                                    onRelease { _ ->
+                                        start.adjust(1.seconds)
+                                        hold.adjust(1.seconds)
+                                    }
+                                    start.adjust(1.seconds)
+                                    entered.awaitValue()
+                                    eventually(5.seconds) { hold.sleepers() shouldBe 1 }
+                                },
+                                afterResume = {
+                                    val target = probe.target.awaitValue()
+                                    eventually(5.seconds) {
+                                        probe.pause.sleepers() shouldBe 0
+                                        hold.sleepers() shouldBe 1
+                                        val stack = target.stackTrace
+                                        val observing = target.state == Thread.State.TIMED_WAITING &&
+                                            LockSupport.getBlocker(target) != null &&
+                                            stack.any { it.methodName == "observe" } &&
+                                            stack.any { it.methodName == "closeAndAwait" }
+                                        (returned.peek() != null || observing) shouldBe true
+                                    }
+                                    returned.peek() shouldBe null
+                                    if (stop) throw marker
+                                    hold.adjust(1.seconds)
+                                },
+                            ) {
+                                callers.closeAndAwait()
+                                returned.tryComplete(Unit)
+                            }
+                        }
+                        if (stop) shouldThrow<AssertionError>({ exercise() }) { (it === marker) shouldBe true }
+                        else exercise()
+                        late.await()
+                    }
+                }
+                returned.peek() shouldBe Unit
+                probe.target.awaitValue().isAlive shouldBe false
+                probe.holder.awaitValue().isAlive shouldBe false
+                listOf(start, hold, probe.blocker, probe.holderStart, probe.targetStart, probe.pause).forEach {
+                    it.sleepers() shouldBe 0
+                }
+                shouldThrow<IllegalStateException>({ callers.call { throw AssertionError("closed body ran") } }) {
+                    it.message shouldBe "the key cache is closed"
+                }
+            }
+        }
+
+        listOf(false, true).forEach { unwind ->
+            test("accepted callers keep close parked through ${if (unwind) "Resource unwind" else "body entry"}") {
+                val probe = PendingCallerProbe()
+                pendingCaller(probe, unwind = unwind, inspect = { _, closer ->
+                    LockSupport.unpark(closer)
+                    closer.interrupt()
+                    eventually(5.seconds) { closer.isInterrupted shouldBe false }
+                    eventually(5.seconds) { closer.state shouldBe Thread.State.TIMED_WAITING }
+                    probe.ended.peek() shouldBe null
+                })
+                probe.ended.peek() shouldBe true
+            }
+        }
+
+        test("two closers preserve the same pending caller until it finishes") {
+            val probe = PendingCallerProbe()
+            val secondThread = Promise<Nothing, Thread>()
+            val secondDone = HandoffDecision<Unit>()
+            val join = HandoffDecision<() -> Unit>()
+            scope {
+                pendingCaller(probe, inspect = { callers, _ ->
+                    val second = async {
+                        secondThread.succeed(Thread.currentThread())
+                        clock.locally(fixedClock()) { callers.closeAndAwait() }
+                        secondDone.tryComplete(Unit)
+                    }
+                    join.tryComplete { second.await() }
+                    val closer = secondThread.awaitValue()
+                    eventually(5.seconds) { closer.state shouldBe Thread.State.TIMED_WAITING }
+                    secondDone.peek() shouldBe null
+                })
+                checkNotNull(join.peek()).invoke()
+                secondDone.peek() shouldBe Unit
+            }
+        }
+
+        test("a real precommit fence interruption clears before retry and restores at close exit") {
+            val probe = CallerFenceProbe()
+            val callers = KeyCallers(SingleFlight())
+            val committed = HandoffDecision<Unit>()
+            val flag = HandoffDecision<Boolean>()
+            withCallerFenceContention(probe, {
+                val stack = checkNotNull(probe.waiting.peek()).stackTrace
+                stack.any { it.methodName == "closeAndAwait" } shouldBe true
+                stack.any { it.methodName == "fence" } shouldBe true
+                committed.peek() shouldBe null
+            }) {
+                atDeliveryCommit({ stack -> stack.any { it.methodName == "fence" } }, {
+                    Thread.currentThread().isInterrupted shouldBe false
+                    committed.tryComplete(Unit)
+                }) { callers.closeAndAwait() }
+                flag.tryComplete(Thread.currentThread().isInterrupted)
+            }
+            committed.peek() shouldBe Unit
+            flag.peek() shouldBe true
+            shouldThrow<IllegalStateException>({ callers.call {} }) { it.message shouldBe "the key cache is closed" }
+        }
+
+        listOf("plain", "cycle", "disabled", "cancellation").forEach { mode ->
+            test("committed fence and reap failures retain received roots for $mode") {
+                val probe = PendingCallerProbe()
+                val nested = IllegalStateException("synthetic nested close failure")
+                val primary: Throwable = when (mode) {
+                    "disabled" -> object : Throwable("synthetic close", null, false, false) {}
+                    "cancellation" -> CancellationException("synthetic close")
+                    else -> InterruptedException("synthetic close")
+                }
+                if (mode == "plain" || mode == "cycle") primary.addSuppressed(nested)
+                if (mode == "cycle") nested.addSuppressed(primary)
+                val later = InterruptedException("synthetic committed reap")
+                val expected = if (mode == "plain" || mode == "cycle") nested else primary
+                pendingCaller(probe, invoke = { callers ->
+                    atDeliveryCommit({ stack -> stack.any { it.methodName == "fence" } }, { throw primary }) {
+                        atDeliveryCommit({ stack -> stack.any { it.methodName == "reap" } }, { throw later }) {
+                            shouldThrow<Throwable>({ callers.closeAndAwait() }) { (it === expected) shouldBe true }
+                        }
+                    }
+                })
+                probe.ended.peek() shouldBe true
+                if (mode == "disabled") primary.suppressed.toList() shouldBe emptyList()
+                else (expected.suppressed.any { it === later }) shouldBe true
+                if (mode == "plain" || mode == "cycle") (expected.suppressed.any { it === primary }) shouldBe true
+            }
+        }
+
+        test("opaque Fail retains its received cleanup root before its owning attempt") {
+            val probe = PendingCallerProbe()
+            val error = Any()
+            val release = IllegalStateException("synthetic reap after Fail")
+            pendingCaller(probe, invoke = { callers ->
+                val answer = attempt<Any, Unit> {
+                    val owner = this
+                    atDeliveryCommit({ stack -> stack.any { it.methodName == "fence" } }, { owner.fail(error) }) {
+                        atDeliveryCommit({ stack -> stack.any { it.methodName == "reap" } }, { throw release }) {
+                            shouldThrow<Throwable>({ callers.closeAndAwait() }) { signal ->
+                                signal.stackTrace.toList() shouldBe emptyList()
+                                signal.suppressed.toList() shouldBe listOf(release)
+                                throw signal
+                            }
+                        }
+                    }
+                }
+                answer.shouldBeLeft { (it === error) shouldBe true }
+            })
+        }
+
+        test("same-owner direct inherited and observer closes refuse before fencing") {
+            val flights = SingleFlight<Any, KeyError, Unit>()
+            val callers = KeyCallers(flights)
+            resourceScope {
+                onRelease { _ -> flights.closeAndJoin() }
+                val refuse = {
+                    shouldThrow<IllegalStateException>({ callers.closeAndAwait() }) {
+                        it.message shouldBe "a key cache caller cannot close its owner"
+                    }
+                }
+                callers.call {
+                    refuse()
+                    flights.run(Any()) {
+                        refuse()
+                        Either.Right(Unit)
+                    }
+                }
+                atDeliveryCommit({ stack -> stack.any { it.methodName == "admit" } }, refuse) { callers.call {} }
+                atDeliveryCommit({ stack -> stack.any { it.methodName == "fence" } }, refuse) {
+                    callers.closeAndAwait()
+                }
+            }
+        }
+
+        test("normal interrupted pool stop clears before actual caller observation and restores on exit") {
+            val probe = PendingCallerProbe()
+            val flights = SingleFlight<Any, KeyError, Unit>()
+            val started = Promise<Nothing, Unit>()
+            scope {
+                val worker = async {
+                    flights.run(Any()) {
+                        shouldThrow<InterruptedException>({
+                            resourceScope {
+                                onRelease { _ -> probe.pool.sleep(1.seconds) }
+                                started.succeed(Unit)
+                                Promise<Nothing, Unit>().awaitValue()
+                            }
+                        }) {}
+                        Either.Right(Unit)
+                    }
+                }
+                started.awaitValue()
+                pendingCaller(probe, flights = flights, beforeWait = { closer ->
+                    eventually(5.seconds) { probe.pool.sleepers() shouldBe 1 }
+                    eventually(5.seconds) { closer.state shouldBe Thread.State.WAITING }
+                    closer.stackTrace.any { it.methodName == "closeAndJoin" } shouldBe true
+                    closer.interrupt()
+                    probe.pool.adjust(1.seconds)
+                }, inspect = { _, closer -> closer.isInterrupted shouldBe false })
+                worker.await()
+            }
+            probe.ended.peek() shouldBe true
+            probe.pool.sleepers() shouldBe 0
+        }
+
+        test("a real same-pool stop error still observes callers and relays the same failure") {
+            val probe = PendingCallerProbe()
+            val failure = HandoffDecision<Throwable>()
+            pendingCaller(probe, workerFailure = failure, invoke = { callers ->
+                shouldThrow<IllegalStateException>({ callers.closeAndAwait() }) {
+                    failure.tryComplete(it)
+                    it.message shouldBe "A SingleFlight worker cannot close its owner"
+                    it.stackTrace.any { frame -> frame.methodName == "closeAndJoin" } shouldBe true
+                    throw it
+                }
+            })
+            (failure.peek() != null) shouldBe true
+        }
+
+        listOf("ordinary", "nested", "solo").forEach { mode ->
+            test("close refuses $mode steps before same-owner checks and preserves interruption") {
+                val callers = KeyCallers(SingleFlight())
+                val thread = Thread.currentThread()
+                val before = thread.isInterrupted
+                try {
+                    callers.call {
+                        val invoke: () -> Unit = {
+                            thread.interrupt()
+                            shouldThrow<IllegalStateException>({ callers.closeAndAwait() }) {
+                                it.message shouldBe "the operation cannot run inside a transaction"
+                            }
+                            thread.isInterrupted shouldBe true
+                            Thread.interrupted()
+                        }
+                        when (mode) {
+                            "ordinary" -> transact { invoke() }
+                            "nested" -> transact { transact { invoke() } }
+                            "solo" -> transact(soloAfter = 0) { invoke() }
+                            else -> throw CallerFenceProbeSetupFailure()
+                        }
+                    }
+                    callers.call {}
+                    callers.closeAndAwait()
+                } finally {
+                    Thread.interrupted()
+                    if (before) thread.interrupt()
+                }
+            }
+        }
+
+        test("committed terminal reap is not repeated and an empty close has nothing to reap") {
+            val callers = KeyCallers(SingleFlight())
+            val first = HandoffDecision<Unit>()
+            val again = HandoffDecision<Unit>()
+            callers.call {}
+            atDeliveryCommit({ stack -> stack.any { it.methodName == "reap" } }, { first.tryComplete(Unit) }) {
+                callers.closeAndAwait()
+            }
+            atDeliveryCommit({ stack -> stack.any { it.methodName == "reap" } }, { again.tryComplete(Unit) }) {
+                callers.closeAndAwait()
+                KeyCallers(SingleFlight()).closeAndAwait()
+            }
+            first.peek() shouldBe Unit
+            again.peek() shouldBe null
+        }
+
+        test("an assertion during pending observation releases every test gate and joins both workers") {
+            val probe = PendingCallerProbe()
+            val marker = AssertionError("synthetic pending-caller assertion")
+            shouldThrow<AssertionError>({
+                pendingCaller(probe, inspect = { _, _ -> throw marker })
+            }) { (it === marker) shouldBe true }
+            probe.caller.awaitValue().isAlive shouldBe false
+            probe.closer.awaitValue().isAlive shouldBe false
+            probe.gate.sleepers() shouldBe 0
+            probe.pool.sleepers() shouldBe 0
         }
     }
 }
@@ -1584,7 +1901,7 @@ private fun deliveryRecursionRefuses() {
 }
 
 private fun callerFailure(primary: Throwable, expectedExit: ExitCase) {
-    val callers = KeyCallers()
+    val callers = KeyCallers(SingleFlight())
     val first = IllegalStateException("synthetic outer release")
     val second = IllegalStateException("synthetic inner release")
     val released = Shared(emptyList<Pair<Int, ExitCase>>())
@@ -1610,7 +1927,7 @@ private fun callerFailure(primary: Throwable, expectedExit: ExitCase) {
 }
 
 private fun callerGuard(mode: String) {
-    val callers = KeyCallers()
+    val callers = KeyCallers(SingleFlight())
     val body = HandoffDecision<Unit>()
     val commits = Shared(0)
     val invoke = {
@@ -1727,6 +2044,9 @@ private class CallerFenceProbeSetupFailure : IllegalStateException("synthetic ca
 private class PendingCallerProbe {
     val gate = TestClock(Instant.EPOCH)
     val caller = Promise<Nothing, Thread>()
+    val pool = TestClock(Instant.EPOCH)
+    val closer = Promise<Nothing, Thread>()
+    val ended = HandoffDecision<Boolean>()
 
     fun call(callers: KeyCallers, unwind: Boolean, afterHold: () -> Unit) = callers.call {
         caller.succeed(Thread.currentThread())
@@ -1751,5 +2071,67 @@ private class PendingCallerProbe {
         work.await()
         caller.awaitValue().isAlive shouldBe false
         gate.sleepers() shouldBe 0
+    }
+}
+
+private fun pendingCaller(
+    probe: PendingCallerProbe,
+    unwind: Boolean = false,
+    flights: SingleFlight<Any, KeyError, Unit> = SingleFlight(),
+    workerFailure: HandoffDecision<Throwable>? = null,
+    beforeWait: (Thread) -> Unit = {},
+    inspect: (KeyCallers, Thread) -> Unit = { _, _ -> },
+    invoke: (KeyCallers) -> Unit = { it.closeAndAwait() },
+): KeyCallers = clock.locally(SystemClock) {
+    timeout(10.seconds) {
+        scope {
+            val callers = KeyCallers(flights)
+            resourceScope {
+                onRelease { _ -> flights.closeAndJoin() }
+                onRelease { _ -> probe.pool.adjust(1.seconds) }
+                onRelease { _ -> probe.gate.adjust(1.seconds) }
+                val caller = async {
+                    probe.call(callers, unwind) {
+                        shouldThrow<IllegalStateException>({ callers.closeAndAwait() }) {
+                            it.message shouldBe "a key cache caller cannot close its owner"
+                        }
+                    }
+                }
+                probe.awaitHeld()
+                val close = {
+                    probe.closer.succeed(Thread.currentThread())
+                    try {
+                        clock.locally(fixedClock()) { invoke(callers) }
+                    } finally {
+                        probe.ended.tryComplete(Thread.currentThread().isInterrupted)
+                    }
+                }
+                val closer = async {
+                    if (workerFailure == null) close()
+                    else shouldThrow<IllegalStateException>({
+                        flights.run(Any()) {
+                            close()
+                            Either.Right(Unit)
+                        }
+                    }) { (it === workerFailure.peek()) shouldBe true }
+                }
+                val closeThread = probe.closer.awaitValue()
+                beforeWait(closeThread)
+                eventually(5.seconds) { closeThread.state shouldBe Thread.State.TIMED_WAITING }
+                (LockSupport.getBlocker(closeThread) != null) shouldBe true
+                closeThread.stackTrace.any { it.methodName == "closeAndAwait" } shouldBe true
+                probe.ended.peek() shouldBe null
+                val refused = HandoffDecision<Unit>()
+                shouldThrow<IllegalStateException>({ callers.call { refused.tryComplete(Unit) } }) {
+                    it.message shouldBe "the key cache is closed"
+                }
+                refused.peek() shouldBe null
+                inspect(callers, closeThread)
+                probe.finish(caller)
+                closer.await()
+                closeThread.isAlive shouldBe false
+                callers
+            }
+        }
     }
 }

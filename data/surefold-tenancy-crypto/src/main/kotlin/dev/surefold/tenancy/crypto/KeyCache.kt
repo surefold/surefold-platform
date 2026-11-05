@@ -5,6 +5,7 @@ import dev.surefold.HandoffDecision
 import dev.surefold.Resource
 import dev.surefold.Shared
 import dev.surefold.SingleFlight
+import dev.surefold.SystemClock
 import dev.surefold.checkNotInTransaction
 import dev.surefold.clock
 import dev.surefold.fail.Either
@@ -19,6 +20,7 @@ import java.time.Instant
 import java.util.concurrent.CancellationException
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.toJavaDuration
 
@@ -365,7 +367,7 @@ internal class KeyCacheLedger {
 }
 
 /** Admission and the final unwind boundary of this cache's callers. */
-internal class KeyCallers {
+internal class KeyCallers(private val flights: SingleFlight<Any, KeyError, Unit>) {
     private class Ticket {
         val finished = HandoffDecision<Unit>()
     }
@@ -377,15 +379,28 @@ internal class KeyCallers {
 
     private class Invocation {
         val failures = mutableListOf<Throwable>()
+        val observed = mutableListOf<Throwable>()
         var admitted = false
 
         fun record(failure: Throwable) {
             if (failures.none { it === failure }) failures.add(failure)
+            val visited = mutableListOf<Throwable>()
+            fun visit(node: Throwable) {
+                if (visited.any { it === node }) return
+                visited.add(node)
+                if (observed.none { it === node }) observed.add(node)
+                node.suppressed.forEach(::visit)
+            }
+            visit(failure)
         }
 
-        fun assembled(): Throwable? {
-            val primary = failures.firstOrNull() ?: return null
-            failures.drop(1).forEach { later ->
+        fun refresh() {
+            failures.toList().forEach(::record)
+        }
+
+        fun assembled(primary: Throwable? = failures.firstOrNull()): Throwable? {
+            if (primary == null) return null
+            failures.forEach { later ->
                 val seen = mutableListOf<Throwable>()
                 if (!contains(primary, later, seen)) primary.addSuppressed(later)
             }
@@ -397,6 +412,143 @@ internal class KeyCallers {
             if (seen.any { it === root }) return false
             seen.add(root)
             return root.suppressed.any { contains(it, target, seen) }
+        }
+    }
+
+    private enum class CloseStage { FENCE, STOP, OBSERVE, REAP }
+
+    private inner class Closing {
+        val outcome = Invocation()
+        var interrupted = Thread.interrupted()
+        private var fenced = false
+        private var observing = false
+        private var remaining = emptyList<Ticket>()
+        private var terminal = emptyList<Ticket>()
+
+        fun sample() {
+            outcome.refresh()
+            interrupted = Thread.interrupted() || interrupted || outcome.observed.any { it is InterruptedException }
+        }
+
+        // Each lifecycle attempt retains special unwinding until reconciliation and later stages have run.
+        @Suppress("TooGenericExceptionCaught")
+        fun phase(stage: CloseStage) {
+            while (true) {
+                val attempt = Invocation()
+                var done = false
+                try {
+                    when (stage) {
+                        CloseStage.FENCE -> fence()
+                        CloseStage.STOP -> flights.closeAndJoin()
+                        CloseStage.OBSERVE -> observe()
+                        CloseStage.REAP -> reap()
+                    }
+                    done = true
+                } catch (failure: Throwable) {
+                    attempt.record(failure)
+                    outcome.record(failure)
+                    try {
+                        when (stage) {
+                            CloseStage.FENCE -> {
+                                val current = state.peek()
+                                fenced = current.closed
+                                remaining = current.tickets
+                                done = fenced
+                            }
+
+                            CloseStage.REAP -> done = state.peek().tickets.none { ticket ->
+                                terminal.any { it === ticket }
+                            }
+
+                            CloseStage.STOP, CloseStage.OBSERVE -> Unit
+                        }
+                    } catch (reconciliation: Throwable) {
+                        attempt.record(reconciliation)
+                        outcome.record(reconciliation)
+                    }
+                } finally {
+                    sample()
+                }
+                attempt.refresh()
+                if (done || attempt.observed.any { it !is InterruptedException }) return
+            }
+        }
+
+        private fun fence() {
+            remaining = state.modify { current -> current.copy(closed = true) to current.tickets }
+            fenced = true
+        }
+
+        // A failed native marker read is retained without preventing attempts of the other captured markers.
+        @Suppress("TooGenericExceptionCaught")
+        private fun observe() {
+            if (!observing) {
+                if (!fenced) remaining = state.peek().tickets
+                observing = true
+            }
+            while (remaining.isNotEmpty()) {
+                remaining = remaining.filter { ticket ->
+                    val attempt = Invocation()
+                    try {
+                        if (ticket.finished.peek() == null) true
+                        else {
+                            terminal = terminal + ticket
+                            false
+                        }
+                    } catch (failure: Throwable) {
+                        attempt.record(failure)
+                        outcome.record(failure)
+                        attempt.refresh()
+                        attempt.observed.all { it is InterruptedException }
+                    } finally {
+                        sample()
+                    }
+                }
+                if (remaining.isNotEmpty()) {
+                    try {
+                        SystemClock.sleep(10.milliseconds)
+                    } finally {
+                        sample()
+                    }
+                }
+            }
+        }
+
+        private fun reap() {
+            if (terminal.isNotEmpty()) state.update { current ->
+                current.copy(tickets = current.tickets.filterNot { ticket -> terminal.any { it === ticket } })
+            }
+        }
+    }
+
+    // Capture inside the owner binding before restoration can mask it; outer capture retains restoration too.
+    @Suppress("TooGenericExceptionCaught")
+    fun closeAndAwait() {
+        checkNotInTransaction()
+        check(identity !in active.get()) { "a key cache caller cannot close its owner" }
+        val closing = Closing()
+        var boundaryFailure: Throwable? = null
+        try {
+            try {
+                active.locally(active.get() + identity) {
+                    try {
+                        CloseStage.entries.forEach(closing::phase)
+                    } catch (failure: Throwable) {
+                        closing.outcome.record(failure)
+                    }
+                }
+            } catch (restoration: Throwable) {
+                closing.outcome.record(restoration)
+                boundaryFailure = restoration
+            }
+            closing.sample()
+            val primary = closing.outcome.observed.firstOrNull { it !is InterruptedException }
+                ?: boundaryFailure
+            val failure = closing.outcome.assembled(primary)
+            if (failure != null) throw failure
+        } finally {
+            closing.sample()
+            if (closing.interrupted) Thread.currentThread().interrupt()
         }
     }
 
