@@ -365,7 +365,7 @@ internal class KeyCacheLedger {
 }
 
 /** Admission and the final unwind boundary of this cache's callers. */
-internal class KeyCallers {
+internal class KeyCallers(private val flights: SingleFlight<Any, KeyError, Unit>) {
     private class Ticket {
         val finished = HandoffDecision<Unit>()
     }
@@ -447,5 +447,10 @@ internal class KeyCallers {
         }
         check(invocation.admitted) { "the key cache is closed" }
         return true
+    }
+
+    fun closeAndAwait() {
+        checkNotInTransaction()
+        flights.closeAndJoin()
     }
 }
