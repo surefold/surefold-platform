@@ -954,7 +954,11 @@ object RetainedKeyCallersSuite : Suite(concurrent = false, isolated = true) {
                 }
             }
         }
+    }
+}
 
+object RetainedKeyCallersCloseSuite : Suite(concurrent = false, isolated = true) {
+    init {
         listOf(false, true).forEach { stop ->
             test("atomic caller fence captures late admission and cleans up after assertion: $stop") {
                 val probe = CallerFenceProbe()
