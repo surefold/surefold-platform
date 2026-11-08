@@ -1,11 +1,13 @@
 package dev.surefold.tenancy.crypto
 
 import dev.surefold.Counter
+import dev.surefold.Deferred
 import dev.surefold.ExitCase
 import dev.surefold.HandoffDecision
 import dev.surefold.Metrics
 import dev.surefold.NoMetrics
 import dev.surefold.Promise
+import dev.surefold.ResourceScope
 import dev.surefold.Shared
 import dev.surefold.SingleFlight
 import dev.surefold.SystemClock
@@ -628,6 +630,30 @@ object RetainedKeyCallersSuite : Suite(concurrent = false, isolated = true) {
             events.peek() shouldBe listOf("body", "release", "returned")
         }
 
+        listOf(false, true).forEach { unwind ->
+            test("an accepted caller stays held through body or Resource release: $unwind") {
+                val probe = PendingCallerProbe()
+                val callers = KeyCallers()
+                val callback = HandoffDecision<Unit>()
+                val returned = HandoffDecision<Unit>()
+                scope {
+                    resourceScope {
+                        onRelease { _ -> probe.gate.adjust(1.seconds) }
+                        val work = async {
+                            probe.call(callers, unwind) { callback.tryComplete(Unit) }
+                            returned.tryComplete(Unit)
+                        }
+                        probe.awaitHeld()
+                        callback.peek() shouldBe null
+                        returned.peek() shouldBe null
+                        probe.finish(work)
+                    }
+                }
+                callback.peek() shouldBe Unit
+                returned.peek() shouldBe Unit
+            }
+        }
+
         test("a committed admission observer throw preserves original and runs no body") {
             val callers = KeyCallers()
             val marker = IllegalStateException("synthetic admission observer")
@@ -856,6 +882,76 @@ object RetainedKeyCallersSuite : Suite(concurrent = false, isolated = true) {
             state.peek() shouldBe 0
             state.update { it + 1 }
             state.peek() shouldBe 1
+        }
+
+        listOf(false, true).forEach { stop ->
+            test("pause-only handoffs retain late state and clean up after assertion: $stop") {
+                val probe = CallerFenceProbe()
+                val start = TestClock(Instant.EPOCH)
+                val hold = TestClock(Instant.EPOCH)
+                val entered = Promise<Nothing, Unit>()
+                val captured = HandoffDecision<Int>()
+                val handoffs = Shared(0)
+                val state = Shared(0)
+                val marker = AssertionError("synthetic after-admission assertion")
+                scope {
+                    resourceScope {
+                        onRelease { _ ->
+                            start.adjust(1.seconds)
+                            hold.adjust(1.seconds)
+                        }
+                        val late = async {
+                            start.sleep(1.seconds)
+                            state.update { it + 1 }
+                            entered.succeed(Unit)
+                            hold.sleep(1.seconds)
+                        }
+                        eventually(5.seconds) { start.sleepers() shouldBe 1 }
+                        val exercise = {
+                            withCallerFenceContention(
+                                probe, { state.peek() shouldBe 0 },
+                                interruptAfterPause = false,
+                                afterHolder = {
+                                    onRelease { _ ->
+                                        start.adjust(1.seconds)
+                                        hold.adjust(1.seconds)
+                                    }
+                                    handoffs.update { it + 1 }
+                                    start.adjust(1.seconds)
+                                    entered.awaitValue()
+                                    eventually(5.seconds) { hold.sleepers() shouldBe 1 }
+                                },
+                                afterResume = {
+                                    val target = probe.target.awaitValue()
+                                    eventually(5.seconds) {
+                                        (captured.peek() != null) shouldBe true
+                                        target.state shouldBe Thread.State.WAITING
+                                        (LockSupport.getBlocker(target) === late) shouldBe true
+                                    }
+                                    captured.peek() shouldBe 1
+                                    handoffs.peek() shouldBe 1
+                                    hold.sleepers() shouldBe 1
+                                    if (stop) throw marker
+                                    hold.adjust(1.seconds)
+                                },
+                            ) {
+                                captured.tryComplete(state.modify { it + 10 to it })
+                                late.await()
+                            }
+                        }
+                        if (stop) shouldThrow<AssertionError>({ exercise() }) { (it === marker) shouldBe true }
+                        else exercise()
+                        late.await()
+                    }
+                }
+                captured.peek() shouldBe 1
+                state.peek() shouldBe 11
+                probe.target.awaitValue().isAlive shouldBe false
+                probe.holder.awaitValue().isAlive shouldBe false
+                listOf(start, hold, probe.blocker, probe.holderStart, probe.targetStart, probe.pause).forEach {
+                    it.sleepers() shouldBe 0
+                }
+            }
         }
     }
 }
@@ -1541,6 +1637,9 @@ private fun callerGuard(mode: String) {
 private fun withCallerFenceContention(
     probe: CallerFenceProbe,
     whileBlocked: () -> Unit,
+    interruptAfterPause: Boolean = true,
+    afterHolder: ResourceScope.() -> Unit = {},
+    afterResume: () -> Unit = {},
     invoke: () -> Unit,
 ) {
     clock.locally(SystemClock) {
@@ -1557,7 +1656,7 @@ private fun withCallerFenceContention(
                     val target = async {
                         probe.target.succeed(Thread.currentThread())
                         probe.targetStart.sleep(1.seconds)
-                        probe.run(invoke)
+                        probe.run(interruptAfterPause, invoke)
                     }
                     val holderThread = probe.holder.awaitValue()
                     val targetThread = probe.target.awaitValue()
@@ -1572,7 +1671,9 @@ private fun withCallerFenceContention(
                     whileBlocked()
                     probe.blocker.adjust(1.seconds)
                     holder.await()
+                    afterHolder()
                     probe.pause.adjust(1.seconds)
+                    afterResume()
                     target.await()
                 }
             }
@@ -1590,7 +1691,7 @@ private class CallerFenceProbe {
     val pause = TestClock(Instant.EPOCH)
     val waiting = HandoffDecision<Thread>()
 
-    fun run(invoke: () -> Unit) {
+    fun run(interruptAfterPause: Boolean = true, invoke: () -> Unit) {
         val current = Thread.currentThread()
         val turns = object : Turns {
             override fun forking(): Any = this
@@ -1613,7 +1714,7 @@ private class CallerFenceProbe {
                 ) throw CallerFenceProbeSetupFailure()
                 // The nested clock park passes through this seam without selecting the outer Solo frame again.
                 pause.sleep(1.seconds)
-                current.interrupt()
+                if (interruptAfterPause) current.interrupt()
                 return false
             }
         }
@@ -1622,3 +1723,33 @@ private class CallerFenceProbe {
 }
 
 private class CallerFenceProbeSetupFailure : IllegalStateException("synthetic caller fence probe setup failed")
+
+private class PendingCallerProbe {
+    val gate = TestClock(Instant.EPOCH)
+    val caller = Promise<Nothing, Thread>()
+
+    fun call(callers: KeyCallers, unwind: Boolean, afterHold: () -> Unit) = callers.call {
+        caller.succeed(Thread.currentThread())
+        val hold = {
+            gate.sleep(1.seconds)
+            afterHold()
+        }
+        resourceScope {
+            onRelease { _ -> if (unwind) hold() }
+            if (!unwind) hold()
+        }
+    }
+
+    fun awaitHeld(): Thread {
+        val thread = caller.awaitValue()
+        eventually(5.seconds) { gate.sleepers() shouldBe 1 }
+        return thread
+    }
+
+    fun finish(work: Deferred<*>) {
+        gate.adjust(1.seconds)
+        work.await()
+        caller.awaitValue().isAlive shouldBe false
+        gate.sleepers() shouldBe 0
+    }
+}
