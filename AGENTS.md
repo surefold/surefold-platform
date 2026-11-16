@@ -99,7 +99,8 @@ A dependency added to any module is a build failure, not a judgement call.
 Code here uses what surefold ships, in tests and examples too: `scope`/`async` rather than a `Thread` or an
 `ExecutorService`, `Promise` rather than a `CountDownLatch`, `Shared` rather than `synchronized` or a lock, `channel`
 rather than a `BlockingQueue`, `clock` rather than `System.nanoTime`, `testActors` and `explore` rather than real
-threads and retries, `Suite` and `surefold-assert` rather than plain JUnit. The full table is in core's
+threads and retries, `Suite` and `surefold-assert` rather than plain JUnit. Errors the same way: `fail` in a `Fail<E>`
+scope rather than `throw`, `Either.catchOrThrow` rather than `try`/`catch`, `recover` rather than a catch-and-default. The full table is in core's
 [`SKILL.md`](https://github.com/surefold/surefold-core/blob/main/plugins/surefold/skills/surefold/SKILL.md); core's
 specs 0307 and 0309 say which code is exempt and why.
 
