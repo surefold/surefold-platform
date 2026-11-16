@@ -5,10 +5,11 @@
 `AGENTS.md` now asks for surefold's primitives over the JDK's, but nothing enforces it. Core enforces part of it:
 its spec 0309 made `Thread.ofVirtual`, `Thread.ofPlatform` and `Thread(..)` in main sources a detekt failure, with
 every remaining use listed with its reason. This repository's `detekt.yml` has no such rule, and its main sources
-use the JDK's primitives in 8 files:
+use the JDK's primitives in 7 files:
 
-- **Data modules:** `surefold-jobs`' `JobWorker`, `surefold-postgres-notify`'s `PostgresNotifications` and
-  `surefold-tenancy-crypto`'s `KeyCache`.
+- **Data modules:** `surefold-jobs`' `JobWorker` (a `ReentrantLock`) and `surefold-tenancy-crypto`'s `KeyCache`
+  (`synchronized`). `PostgresNotifications` was counted in the first draft, but it only calls
+  `Thread.currentThread()`, which the rule leaves alone.
 - **`surefold-bank`:** `Api`, `BankNode`, `Main`, `Sse` and `Train`.
 
 Tests use them more: 12 files start threads, 10 use latches, 3 use blocking queues and 5 sleep.
@@ -56,19 +57,20 @@ while it is reviewed. Recommended: rule first.
 
 ## Stack
 
-- [ ] **`spec-0001-rule`**: the rule, with the eight main files listed in `excludes` with their reasons.
-      Done when: a new `CountDownLatch` in a main source, `surefold-bank`'s included, fails `./gradlew detekt`
-      until its file is listed.
+- [x] **`spec-0001-rule`**: the rule, with the seven main files listed in `excludes` with their reasons.
+      Done when: a new `CountDownLatch` in a main source, `surefold-bank`'s included, fails `./gradlew detektMain`
+      until its file is listed. The rule matches by fully qualified name, so only the type-resolved `detektMain`,
+      which `check` runs, enforces it; plain `detekt` cannot resolve names.
 - [ ] **`spec-0001-bank`**: `surefold-bank`'s five files onto `scope`/`async`, `Promise`, `Shared` and
       `channel`.
       Done when: the rule lists none of them, and the bank's tests pass unchanged.
-- [ ] **`spec-0001-data`**: `JobWorker`, `PostgresNotifications` and `KeyCache`.
+- [ ] **`spec-0001-data`**: `JobWorker` and `KeyCache`.
       Done when: the same, for those files.
 
 ## Acceptance
 
 ```bash
-./gradlew detekt
+./gradlew detektMain
 grep -n -A30 "ForbiddenMethodCall/threads" config/detekt/detekt.yml
 ./gradlew spotlessApply && ./gradlew build
 ```
@@ -76,9 +78,10 @@ grep -n -A30 "ForbiddenMethodCall/threads" config/detekt/detekt.yml
 ## Open questions
 
 1. **Test sources too?** Agents copy tests most, and 20 test files use these. Recommended: a later spec, after
-   core's 0307 settles the test patterns.
-2. **Bank before data, or after?** The bank is copied most; the data modules are run most. Recommended: bank first.
+   core's 0307 settles the test patterns. Taken as recommended when the spec was built (2026-11-16).
+2. **Bank before data, or after?** The bank is copied most; the data modules are run most. Recommended: bank first. Taken as recommended when the spec was built (2026-11-16).
 3. **`PostgresNotifications` and the driver's `LISTEN` loop.** If the driver needs a blocking thread for the
    loop, a forked `scope` is still the owner. Recommended: move it, unless the driver forbids that, then list it.
+   Moot: it starts no thread and takes no lock the rule names.
 4. **`Executors.new*` in one line or each factory?** detekt matches exact names. Recommended: each factory by
-   name. The scheduled ones are core 0132's compiler warning.
+   name. The scheduled ones are core 0132's compiler warning. Taken as recommended when the spec was built (2026-11-16).
