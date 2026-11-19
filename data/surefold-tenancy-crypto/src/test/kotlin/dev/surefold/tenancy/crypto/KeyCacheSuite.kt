@@ -47,6 +47,24 @@ object KeyCacheSuite : Suite() {
             }
         }
 
+        test("Unavailable arriving after hard expiry returns the original refusal") {
+            val time = TestClock()
+            val cache = KeyCache()
+            val loaded = Unwrapping()
+            val refusal = Either.Left(KeyError.Unavailable("synthetic refresh refusal"))
+
+            clock.locally(time) {
+                cache.get(active, loaded::load).shouldBeInstanceOf<Either.Right<DataKey>>()
+                time.adjust(55.minutes)
+                val answer = cache.get(active) {
+                    time.adjust(6.minutes)
+                    refusal
+                }
+
+                (answer === refusal) shouldBe true
+            }
+        }
+
         test("the KMS is asked once per soft period, however many threads ask at once") {
             val time = TestClock()
             val unwrapping = Unwrapping()
