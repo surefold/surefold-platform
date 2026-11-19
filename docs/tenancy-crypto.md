@@ -136,6 +136,55 @@ PostgresNotifications.listen(listenSource, setOf(TenantKeys.CHANNEL))
 
 Without it, another process uses the old version for at most `soft`.
 
+## Retained key views
+
+The retained view API requires a build with joined cache shutdown. The 0.18.0 `KeyRing` still returns independent
+`DataKey` arrays, which the caller owns and can clear. Cache eviction, revocation and shutdown leave those copies
+in their callers' ownership.
+
+Use `KeyCache.lease` for a revocable borrow. Build a `KeyIdentity` from the owner, purpose, version and the caller's
+immutable revision for the durable key record. The revision must distinguish different key material for the same
+logical slot. Equal identities require interchangeable loaders. When a loader returns `Right(DataKey)`, the cache
+takes ownership of its material. Before that return, the loader owns and clears any temporary or partial bytes.
+
+Keep each `KeyView` in a scope and use its bytes only inside `using`. Return the operation result and keep all
+copies of the key within the callback. The cache clears the working array on callback exit. At the hard deadline,
+the view returns `KeyError.Unavailable`.
+
+<!-- retained-key-views -->
+```kotlin
+import dev.surefold.fail.Either
+import dev.surefold.fail.flatMap
+import dev.surefold.resourceScope
+import dev.surefold.tenancy.crypto.DataKey
+import dev.surefold.tenancy.crypto.KeyCache
+import dev.surefold.tenancy.crypto.KeyError
+import dev.surefold.tenancy.crypto.KeyIdentity
+
+private fun <A> withRetainedKeyCache(work: (KeyCache) -> A): A = resourceScope {
+    val cache = KeyCache()
+    onRelease { _ -> cache.closeAndJoin() }
+    work(cache)
+}
+
+private fun <A> useRetainedKey(
+    cache: KeyCache,
+    identity: KeyIdentity,
+    load: () -> Either<KeyError, DataKey>,
+    operation: (ByteArray) -> A,
+): Either<KeyError, A> = cache.lease(identity, load).flatMap { view ->
+    resourceScope {
+        onRelease { _ -> view.close() }
+        view.using(operation)
+    }
+}
+```
+
+Share the cache across operations within its owner scope. `evict(owner)` drops retention and lets still-valid views
+finish. `revoke(owner)` or `revokeAll()` invalidates held views in the cache, including views whose retention was
+already dropped. A revoked view returns `KeyError.Denied`. At shutdown, `closeAndJoin()` closes admission, cancels
+and joins loaders, revokes views and waits for admitted callbacks to unwind before releasing its dependencies.
+
 ## AWS KMS
 
 `AwsKms` makes one symmetric customer managed key per owner, found by `aliasPrefix` plus the tenant id (or
