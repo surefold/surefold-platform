@@ -39,6 +39,96 @@ import java.util.concurrent.locks.LockSupport
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
+object RetainedLeaseSuite : Suite() {
+    private fun identity(revision: Int = 1, owner: KeyOwner = KeyOwner.Platform) =
+        KeyIdentity(owner, KeyPurpose.Enc, 1, byteArrayOf(revision.toByte()))
+
+    private fun loaded(identity: KeyIdentity, source: ByteArray) =
+        Either.Right(DataKey(identity.owner, identity.purpose, identity.version, source))
+
+    private fun ResourceScope.borrow(cache: KeyCache, identity: KeyIdentity, vararg material: Byte): KeyView {
+        val view = (cache.lease(identity) { loaded(identity, material) } as Either.Right).value
+        onRelease { _ -> view.close() }
+        return view
+    }
+
+    private fun read(view: KeyView) = view.using { it.single().toInt() }
+
+    init {
+        test("forget keeps a held lease valid and makes the next lease load fresh material") {
+            val cache = KeyCache()
+            val key = identity()
+            resourceScope {
+                onRelease { _ -> cache.revokeAll() }
+                val held = borrow(cache, key, 3)
+                cache.evict(key.owner)
+                read(held) shouldBe Either.Right(3)
+                val fresh = borrow(cache, key, 7)
+
+                read(fresh) shouldBe Either.Right(7)
+                read(held) shouldBe Either.Right(3)
+                cache.revoke(key.owner)
+                read(held) shouldBe Either.Left(KeyError.Denied("the key view is unavailable"))
+                read(fresh) shouldBe Either.Left(KeyError.Denied("the key view is unavailable"))
+            }
+        }
+
+        test("Unavailable in the same slot cannot reuse material from another identity") {
+            val cache = KeyCache()
+            val time = TestClock()
+            val refusal = Either.Left(KeyError.Unavailable("synthetic qualified refusal"))
+            clock.locally(time) {
+                resourceScope {
+                    onRelease { _ -> cache.revokeAll() }
+                    borrow(cache, identity(), 3)
+                    time.adjust(16.minutes)
+                    val answer = cache.lease(identity(2)) { refusal }
+                    if (answer is Either.Right) onRelease { _ -> answer.value.close() }
+
+                    (answer === refusal) shouldBe true
+                }
+            }
+        }
+
+        test("a definitive refusal from a forgotten epoch cannot remove newer retention") {
+            val cache = KeyCache()
+            val key = identity()
+            val time = TestClock()
+            val entered = Promise<Nothing, Unit>()
+            val resume = Promise<Nothing, Unit>()
+            val refusal = Either.Left(KeyError.Denied("synthetic old refresh"))
+            clock.locally(SystemClock) {
+                timeout(10.seconds) {
+                    clock.locally(time) {
+                        resourceScope {
+                            onRelease { _ -> cache.revokeAll() }
+                            borrow(cache, key, 3)
+                            time.adjust(16.minutes)
+                            scope {
+                                onClose { resume.succeed(Unit) }
+                                val old = async {
+                                    cache.lease(key) {
+                                        entered.succeed(Unit)
+                                        resume.awaitValue()
+                                        refusal
+                                    }
+                                }
+                                entered.awaitValue()
+                                cache.evict(key.owner)
+                                borrow(cache, key, 7)
+                                resume.succeed(Unit)
+                                (old.await() === refusal) shouldBe true
+
+                                read(borrow(cache, key, 9)) shouldBe Either.Right(7)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 object FrozenKeyDeliverySuite : Suite() {
     init {
         test("an already frozen enrolled receipt replays without starting another worker") {
