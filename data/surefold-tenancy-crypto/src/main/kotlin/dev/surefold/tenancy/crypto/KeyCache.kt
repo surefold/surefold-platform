@@ -50,11 +50,21 @@ class KeyCache(
     internal fun get(slot: Slot, load: () -> Either<KeyError, DataKey>): Either<KeyError, DataKey> =
         KeyCacheLedger.DeliveryCall.copy(callers, ledger, ledger.enrol(slot, clock.get()), load)
 
+    fun lease(identity: KeyIdentity, load: () -> Either<KeyError, DataKey>): Either<KeyError, KeyView> =
+        KeyCacheLedger.DeliveryCall.view(callers, ledger, ledger.enrol(identity, clock.get()), load)
+
+    fun revoke(owner: KeyOwner) = ledger.revoke(owner)
+
+    fun revokeAll() = ledger.revoke(null)
+
     /** Drops every retained key of [owner]'s. Existing copies remain independently owned. */
     fun evict(owner: KeyOwner) = ledger.evict(owner)
 }
 
 private operator fun Instant.plus(duration: Duration): Instant = plus(duration.toJavaDuration())
+
+private val viewDenied = KeyError.Denied("the key view is unavailable")
+private val viewExpired = KeyError.Unavailable("the key view has expired")
 
 /** Immutable retention decisions. The ledger owns the sources behind these opaque IDs. */
 internal class KeyRetention private constructor(
@@ -141,6 +151,11 @@ internal class KeyRetention private constructor(
         return Removal(KeyRetention(capacity, ticket, owners - owner), held.slots.values.mapNotNull { it.record })
     }
 
+    fun forgetAll(): Removal = Removal(
+        KeyRetention(capacity, ticket, emptyMap()),
+        owners.values.flatMap { owner -> owner.slots.values.mapNotNull { it.record } },
+    )
+
     private fun update(slot: KeyCache.Slot, owner: Owner, retained: Retained): KeyRetention {
         val changed = owner.copy(slots = owner.slots + (slot to retained))
         return KeyRetention(capacity, ticket, owners + (slot.owner to changed))
@@ -162,19 +177,23 @@ internal class KeyCacheLedger(
     }
     private enum class ReturnDecision { Delivered, Abort }
     private class Prepared(val id: Any, val decision: HandoffDecision<ReturnDecision>, val abort: ReleaseIntent)
-    private sealed interface Source
+    private sealed interface Source { val release: ReleaseIntent }
     private class Legacy(val key: DataKey) : Source {
-        val release = ReleaseIntent { key.material.fill(0) }
+        override val release = ReleaseIntent { key.material.fill(0) }
     }
-    private class Qualified(val material: OwnedKeyMaterial) : Source
+    private class Qualified(val material: OwnedKeyMaterial, val deadline: Instant?) : Source {
+        override val release = ReleaseIntent { material.forget() }
+        val revoked = Shared(false)
+        val revoke = ReleaseIntent { material.revoke() }
+    }
     private class SourceRef(val id: Any, val slot: KeyCache.Slot, val source: Source)
     private sealed interface Outcome
-    private class Value(val result: Either<KeyError, SourceRef>) : Outcome
+    private class Value(val result: Either<KeyError, SourceRef>, val coldExpired: Boolean = false) : Outcome
     private class Thrown(val failure: Throwable) : Outcome
     private data class Group(
         val key: LoadKey, val deadline: Instant, val members: Int = 0,
         val loader: Any? = null, val outcome: Outcome? = null, val releasing: Boolean = false,
-        val admission: KeyRetention.Admission? = null,
+        val admission: KeyRetention.Admission? = null, val revoked: Boolean = false,
     ) {
         val source get() = ((outcome as? Value)?.result as? Either.Right)?.value
         val captured get() = admission?.captured
@@ -213,9 +232,20 @@ internal class KeyCacheLedger(
             ledger.awaitSource(admitted, flights, load).flatMap { ref ->
                 when (val held = ref.source) {
                     is Legacy -> copy(held.key)
-                    is Qualified -> held.material.borrow(admitted.clock, ::register).map { Delivery.View(it) }
+                    is Qualified -> borrow(ref, held, admitted.clock)
                 }
             }.map(project)
+        }
+
+        private fun borrow(ref: SourceRef, held: Qualified, clock: Clock): Either<KeyError, Delivery> {
+            val deadline = held.deadline
+                ?: return held.material.borrow(clock, ::register).map { Delivery.View(it) }
+            if (held.revoked.peek()) return Either.Left(viewDenied)
+            val answer = if (clock.now() >= deadline) Either.Left(viewExpired)
+            else held.material.borrow(clock, ::register)
+            if (held.revoked.peek()) return Either.Left(viewDenied)
+            if (answer is Either.Left && answer.value is KeyError.Unavailable) ledger.expire(ref)
+            return answer.map { Delivery.View(ledger.guarded(ref, held, it)) }
         }
 
         private fun copy(key: DataKey): Either<KeyError, Delivery> = resourceScope {
@@ -269,6 +299,12 @@ internal class KeyCacheLedger(
                 val call = DeliveryCall(ledger, receipt, load) { (it as Delivery.Copy).key }
                 return callers.deliver(call)
             }
+
+            fun view(
+                callers: KeyCallers, ledger: KeyCacheLedger, receipt: Resource<Receipt>,
+                load: () -> Either<KeyError, DataKey>,
+            ): Either<KeyError, KeyView> =
+                callers.deliver(DeliveryCall(ledger, receipt, load) { (it as Delivery.View).view })
         }
     }
 
@@ -282,14 +318,43 @@ internal class KeyCacheLedger(
         ) replay(frozen) else flights.run(receipt.group) { settle(receipt, load) }.flatMap {
             replay(checkNotNull(state.peek().groups[receipt.group]?.outcome))
         }
+        val settled = state.peek().groups.getValue(receipt.group)
+        if (settled.revoked) return Either.Left(viewDenied)
         val stale = group.captured ?: return answer
         if (answer !is Either.Left || answer.value !is KeyError.Unavailable) return answer
+        if ((settled.outcome as? Value)?.coldExpired == true) return answer
         if (receipt.clock.now() >= stale.loadedAt + hard) {
             state.update { it.drop(stale) }
             return answer
         }
         val current = state.peek()
         return if (current.retention.contains(stale)) Either.Right(current.records.getValue(stale.sourceId)) else answer
+    }
+
+    private fun guarded(ref: SourceRef, held: Qualified, view: KeyView): KeyView = object : KeyView by view {
+        override fun <A> using(block: (ByteArray) -> A): Either<KeyError, A> {
+            checkNotInTransaction()
+            if (held.revoked.peek()) return Either.Left(viewDenied)
+            val delegated = view.using { bytes ->
+                if (held.revoked.peek()) return@using Either.Left(viewDenied)
+                val value = block(bytes)
+                if (held.revoked.peek()) Either.Left(viewDenied) else Either.Right(value)
+            }
+            if (held.revoked.peek()) return Either.Left(viewDenied)
+            val answer = delegated.flatMap { it }
+            if (answer is Either.Left && answer.value == viewExpired) expire(ref)
+            return answer
+        }
+
+        override fun close() {
+            checkNotInTransaction()
+            view.close()
+        }
+    }
+
+    private fun expire(ref: SourceRef) = resourceScope {
+        onRelease { _ -> drain() }
+        state.update { it.dropSource(ref.slot, ref.id) }
     }
 
     private fun registerPrepared(row: Prepared) = state.update { it.copy(prepared = it.prepared + row) }
@@ -377,6 +442,11 @@ internal class KeyCacheLedger(
     fun enrol(slot: KeyCache.Slot, clock: Clock): Resource<Receipt> =
         enrol(LoadKey(slot, null, Any()), clock, Instant.MAX, retained = true)
 
+    fun enrol(identity: KeyIdentity, clock: Clock): Resource<Receipt> {
+        val slot = KeyCache.Slot(identity.owner, identity.purpose, identity.version)
+        return enrol(LoadKey(slot, identity, Any()), clock, Instant.MAX, retained = true)
+    }
+
     private fun enrol(key: LoadKey, clock: Clock, deadline: Instant, retained: Boolean): Resource<Receipt> = resource {
         val id = Any()
         val candidate = Any()
@@ -384,7 +454,7 @@ internal class KeyCacheLedger(
         val now = if (retained) clock.now() else deadline
         onRelease { _ -> finishReceipt(id) }
         val group = state.modify { current ->
-            val admitted = if (retained) current.retention.admit(key.slot, key.epoch) else null
+            val admitted = if (retained) current.admit(key) else null
             val loadKey = admitted?.let { key.copy(epoch = it.admission.epoch) } ?: key
             val fresh = admitted?.admission?.captured?.let { current.hit(it, now) }
             val token = if (fresh == null) current.open[loadKey] ?: candidate else candidate
@@ -401,6 +471,9 @@ internal class KeyCacheLedger(
         Receipt(group, id, clock)
     }
 
+    private fun State.admit(key: LoadKey): KeyRetention.Admitted =
+        key.identity?.let { retention.admit(it, key.epoch) } ?: retention.admit(key.slot, key.epoch)
+
     private fun State.hit(record: KeyRetention.Record, now: Instant): Value? =
         if (now < record.loadedAt + soft) Value(Either.Right(records.getValue(record.sourceId))) else null
 
@@ -408,6 +481,24 @@ internal class KeyCacheLedger(
         checkNotInTransaction()
         onRelease { _ -> drain() }
         state.update { current -> current.retention.forget(owner).let { current.retain(it.policy, it.displaced) } }
+    }
+
+    fun revoke(owner: KeyOwner?) = resourceScope {
+        checkNotInTransaction()
+        onRelease { _ -> drain() }
+        state.update { current ->
+            val affected = current.records.values.filter { owner == null || it.slot.owner == owner }
+            val pending = affected.mapNotNull { it.source as? Qualified }
+                .filter { it.revoked.modify { revoked -> true to !revoked } }
+                .map { it.revoke }
+            val groups = current.groups.mapValues { (_, group) ->
+                val identity = group.key.identity
+                val affectedGroup = identity != null && (owner == null || identity.owner == owner)
+                if (affectedGroup) group.copy(revoked = true) else group
+            }
+            val removed = if (owner == null) current.retention.forgetAll() else current.retention.forget(owner)
+            current.copy(groups = groups, pending = current.pending + pending).retain(removed.policy, removed.displaced)
+        }
     }
 
     // A flight must replay the original throwable, including cancellation.
@@ -434,29 +525,41 @@ internal class KeyCacheLedger(
                     val loadedAt = if (group.admission == null) group.deadline else receipt.clock.now()
                     val loaded = load()
                     if (loaded is Either.Right) transferred = loaded.value
-                    val result = loaded.flatMap { key ->
-                        val identity = group.key.identity
-                        if (identity == null) Either.Right(SourceRef(id, group.key.slot, Legacy(key)))
-                        else OwnedKeyMaterial.take(identity, key, group.deadline) {
-                            state.update { it.copy(records = it.records - id) }
-                        }.map { SourceRef(id, group.key.slot, Qualified(it)) }
-                    }
-                    state.update { current ->
+                    val result = loaded.flatMap { takeSource(group, id, it, loadedAt, receipt.clock) }
+                    state.modify { current ->
                         val held = checkNotNull(current.groups[receipt.group])
-                        val source = result.getOrNull()
+                        val frozen = if (held.revoked) Either.Left(viewDenied) else result
+                        val source = frozen.getOrNull()
+                        val expired = loaded is Either.Right && (frozen as? Either.Left)?.value === viewExpired
                         current.copy(
                             open = current.open.filterValues { it !== receipt.group },
-                            groups = current.groups + (receipt.group to held.copy(outcome = Value(result))),
+                            groups = current.groups + (receipt.group to held.copy(outcome = Value(frozen, expired))),
                             records = if (source == null) current.records else current.records + (id to source),
-                        ).publish(held, result, loadedAt)
-                    }
-                    result.map { Unit }
+                        ).publish(held, frozen, loadedAt) to frozen
+                    }.map { Unit }
                 } catch (failure: Throwable) {
                     failed = failure
                     throw failure
                 }
             }
         }
+
+    private fun takeSource(
+        group: Group, id: Any, key: DataKey, at: Instant, clock: Clock,
+    ): Either<KeyError, SourceRef> {
+        val slot = group.key.slot
+        val identity = group.key.identity ?: return Either.Right(SourceRef(id, slot, Legacy(key)))
+        val deadline = group.admission?.let { at + hard }
+        return OwnedKeyMaterial.take(identity, key, deadline ?: group.deadline) {
+            state.update { it.copy(records = it.records - id).dropSource(slot, id) }
+        }.flatMap { material ->
+            if (deadline != null && clock.now() >= deadline) Either.Left(viewExpired)
+            else Either.Right(SourceRef(id, slot, Qualified(material, deadline)))
+        }
+    }
+
+    private fun State.dropSource(slot: KeyCache.Slot, id: Any): State =
+        retention.retained(slot, id)?.let { drop(it) } ?: this
 
     private fun State.publish(group: Group, result: Either<KeyError, SourceRef>, at: Instant): State {
         val admission = group.admission ?: return this
@@ -482,8 +585,8 @@ internal class KeyCacheLedger(
                 it.source === source || it.captured?.sourceId === source.id
             }
         }
-        val releases = released.map { (it.source as Legacy).release }
-        return copy(records = records - released.map { it.id }, pending = pending + releases)
+        val legacy = released.filter { it.source is Legacy }.map { it.id }
+        return copy(records = records - legacy, pending = pending + released.map { it.source.release })
     }
 
     private fun finishReceipt(id: Any) = resourceScope {

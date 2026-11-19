@@ -18,6 +18,7 @@ import dev.surefold.awaitValue
 import dev.surefold.clock
 import dev.surefold.fail.Either
 import dev.surefold.fail.attempt
+import dev.surefold.fail.flatMap
 import dev.surefold.fixedClock
 import dev.surefold.junit.Suite
 import dev.surefold.junit.shouldBe
@@ -38,6 +39,244 @@ import java.util.concurrent.CancellationException
 import java.util.concurrent.locks.LockSupport
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
+
+object RetainedLeaseSuite : Suite() {
+    private fun identity(revision: Int = 1, owner: KeyOwner = KeyOwner.Platform) =
+        KeyIdentity(owner, KeyPurpose.Enc, 1, byteArrayOf(revision.toByte()))
+
+    private fun loaded(identity: KeyIdentity, source: ByteArray) =
+        Either.Right(DataKey(identity.owner, identity.purpose, identity.version, source))
+
+    private fun ResourceScope.borrow(cache: KeyCache, identity: KeyIdentity, vararg material: Byte): KeyView {
+        val view = (cache.lease(identity) { loaded(identity, material) } as Either.Right).value
+        onRelease { _ -> view.close() }
+        return view
+    }
+
+    private fun read(view: KeyView) = view.using { it.single().toInt() }
+
+    init {
+        test("forget keeps a held lease valid and makes the next lease load fresh material") {
+            val cache = KeyCache()
+            val key = identity()
+            resourceScope {
+                onRelease { _ -> cache.revokeAll() }
+                val held = borrow(cache, key, 3)
+                cache.evict(key.owner)
+                read(held) shouldBe Either.Right(3)
+                val fresh = borrow(cache, key, 7)
+                val unrelated = borrow(cache, identity(owner = KeyOwner.Tenant(TenantId("synthetic-unrelated"))), 9)
+
+                read(fresh) shouldBe Either.Right(7)
+                read(held) shouldBe Either.Right(3)
+                cache.revoke(key.owner)
+                read(held) shouldBe Either.Left(KeyError.Denied("the key view is unavailable"))
+                read(fresh) shouldBe Either.Left(KeyError.Denied("the key view is unavailable"))
+                read(unrelated) shouldBe Either.Right(9)
+                cache.evict(unrelated.identity.owner)
+                cache.revokeAll()
+                read(unrelated) shouldBe Either.Left(KeyError.Denied("the key view is unavailable"))
+            }
+        }
+
+        test("Unavailable in the same slot cannot reuse material from another identity") {
+            val cache = KeyCache()
+            val time = TestClock()
+            val refusal = Either.Left(KeyError.Unavailable("synthetic qualified refusal"))
+            clock.locally(time) {
+                resourceScope {
+                    onRelease { _ -> cache.revokeAll() }
+                    borrow(cache, identity(), 3)
+                    time.adjust(16.minutes)
+                    val answer = cache.lease(identity(2)) { refusal }
+                    if (answer is Either.Right) onRelease { _ -> answer.value.close() }
+
+                    (answer === refusal) shouldBe true
+                }
+            }
+        }
+
+        test("a definitive refusal from a forgotten epoch cannot remove newer retention") {
+            val cache = KeyCache()
+            val key = identity()
+            val time = TestClock()
+            val entered = Promise<Nothing, Unit>()
+            val resume = Promise<Nothing, Unit>()
+            val refusal = Either.Left(KeyError.Denied("synthetic old refresh"))
+            clock.locally(SystemClock) {
+                timeout(10.seconds) {
+                    clock.locally(time) {
+                        resourceScope {
+                            onRelease { _ -> cache.revokeAll() }
+                            borrow(cache, key, 3)
+                            time.adjust(16.minutes)
+                            scope {
+                                onClose { resume.succeed(Unit) }
+                                val old = async {
+                                    cache.lease(key) {
+                                        entered.succeed(Unit)
+                                        resume.awaitValue()
+                                        refusal
+                                    }
+                                }
+                                entered.awaitValue()
+                                cache.evict(key.owner)
+                                borrow(cache, key, 7)
+                                resume.succeed(Unit)
+                                (old.await() === refusal) shouldBe true
+
+                                read(borrow(cache, key, 9)) shouldBe Either.Right(7)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        test("a forgotten view keeps its bound clock and its terminal notice preserves the replacement") {
+            val cache = KeyCache()
+            val key = identity()
+            val oldTime = TestClock()
+            val newTime = TestClock()
+            resourceScope {
+                onRelease { _ -> cache.revokeAll() }
+                val held = clock.locally(oldTime) { borrow(cache, key, 3) }
+                cache.evict(key.owner)
+                clock.locally(newTime) { borrow(cache, key, 7) }
+
+                oldTime.adjust(60.minutes)
+                clock.locally(newTime) {
+                    read(held) shouldBe Either.Left(KeyError.Unavailable("the key view has expired"))
+                    held.close()
+                    read(borrow(cache, key, 9)) shouldBe Either.Right(7)
+                }
+            }
+        }
+
+        test("cold expiry wipes and its returned refusal can be forwarded by a provider") {
+            val cache = KeyCache()
+            val key = identity()
+            val time = TestClock()
+            val source = byteArrayOf(7)
+            clock.locally(time) {
+                resourceScope {
+                    onRelease { _ -> cache.revokeAll() }
+                    val result = cache.lease(key) {
+                        time.adjust(60.minutes)
+                        loaded(key, source)
+                    }
+                    if (result is Either.Right) onRelease { _ -> result.value.close() }
+                    result shouldBe Either.Left(KeyError.Unavailable("the key view has expired"))
+                    source.toList() shouldBe listOf<Byte>(0)
+
+                    borrow(cache, key, 3)
+                    time.adjust(16.minutes)
+                    val fallback = cache.lease(key) { result as Either.Left }
+                    if (fallback is Either.Right) onRelease { _ -> fallback.value.close() }
+                    fallback.flatMap(::read) shouldBe Either.Right(3)
+                }
+            }
+        }
+
+        for (right in listOf(false, true)) {
+            val outcome = if (right) "material" else "a refusal"
+            test("an enrolled qualified load returning $outcome cannot answer across revoke") {
+                val cache = KeyCache()
+                val key = identity()
+                val entered = Promise<Nothing, Unit>()
+                val finishLoad = Promise<Nothing, Unit>()
+                val source = byteArrayOf(7)
+                clock.locally(SystemClock) {
+                    timeout(10.seconds) {
+                        resourceScope {
+                            onRelease { _ -> cache.revokeAll() }
+                            scope {
+                                onClose { finishLoad.succeed(Unit) }
+                                val pending = async {
+                                    cache.lease(key) {
+                                        entered.succeed(Unit)
+                                        finishLoad.awaitValue()
+                                        if (right) loaded(key, source)
+                                        else Either.Left(KeyError.Unavailable("synthetic refusal"))
+                                    }
+                                }
+                                entered.awaitValue()
+                                cache.evict(key.owner)
+                                cache.revokeAll()
+                                finishLoad.succeed(Unit)
+                                val result = pending.await()
+                                if (result is Either.Right) onRelease { _ -> result.value.close() }
+
+                                result shouldBe Either.Left(KeyError.Denied("the key view is unavailable"))
+                                if (right) source.toList() shouldBe listOf<Byte>(0)
+                                read(borrow(cache, key, 3)) shouldBe Either.Right(3)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        test("committed revocation outranks hard expiry while a normal callback finishes") {
+            val cache = KeyCache()
+            val key = identity()
+            val time = TestClock()
+            val work = Promise<Nothing, ByteArray>()
+            val finishUse = Promise<Nothing, Unit>()
+            val committed = Promise<Nothing, Unit>()
+            val releaseRevoke = Promise<Nothing, Unit>()
+            clock.locally(SystemClock) {
+                timeout(10.seconds) {
+                    clock.locally(time) {
+                        resourceScope {
+                            onRelease { _ -> cache.revokeAll() }
+                            val held = borrow(cache, key, 7)
+                            scope {
+                                onClose {
+                                    finishUse.succeed(Unit)
+                                    releaseRevoke.succeed(Unit)
+                                }
+                                val use = async {
+                                    held.using { bytes ->
+                                        work.succeed(bytes)
+                                        finishUse.awaitValue()
+                                    }
+                                }
+                                val working = work.awaitValue()
+                                val revoke = async {
+                                    atDeliveryCommit({ stack -> stack.any { it.methodName == "revoke" } }, {
+                                        committed.succeed(Unit)
+                                        releaseRevoke.awaitValue()
+                                    }) { cache.revoke(key.owner) }
+                                }
+                                committed.awaitValue()
+                                time.adjust(60.minutes)
+                                finishUse.succeed(Unit)
+                                use.await() shouldBe Either.Left(KeyError.Denied("the key view is unavailable"))
+                                working.toList() shouldBe listOf<Byte>(0)
+                                releaseRevoke.succeed(Unit)
+                                revoke.await()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        test("public view and revocation effects refuse ambient transactions") {
+            val cache = KeyCache()
+            val key = identity()
+            resourceScope {
+                onRelease { _ -> cache.revokeAll() }
+                val held = borrow(cache, key, 7)
+                shouldThrow<IllegalStateException>({ transact { held.using { true } } })
+                shouldThrow<IllegalStateException>({ transact { held.close() } })
+                shouldThrow<IllegalStateException>({ transact { cache.revoke(key.owner) } })
+                shouldThrow<IllegalStateException>({ transact { cache.revokeAll() } })
+                read(held) shouldBe Either.Right(7)
+            }
+        }
+    }
+}
 
 object FrozenKeyDeliverySuite : Suite() {
     init {
@@ -259,6 +498,16 @@ object KeyCacheLegacyRetentionSuite : Suite() {
 
 object KeyRetentionSuite : Suite() {
     init {
+        test("forgetAll fences a legacy-only epoch with a pending admission and no retained source") {
+            val slot = KeyCache.Slot(KeyOwner.Platform, KeyPurpose.Enc, null)
+            val pending = KeyRetention(1).admit(slot, Any())
+            val forgotten = pending.policy.forgetAll()
+            val new = forgotten.policy.admit(slot, Any())
+
+            forgotten.displaced shouldBe emptyList()
+            new.policy.publish(pending.admission, Any(), Instant.EPOCH).accepted shouldBe false
+        }
+
         test("a slower successful load cannot replace a newer success or restore it after removal") {
             val slot = KeyCache.Slot(KeyOwner.Platform, KeyPurpose.Enc, 1)
             val old = KeyRetention(1).admit(slot, Any())
