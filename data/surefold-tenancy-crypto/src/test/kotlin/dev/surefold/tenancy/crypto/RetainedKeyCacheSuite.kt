@@ -38,6 +38,56 @@ import java.util.concurrent.CancellationException
 import java.util.concurrent.locks.LockSupport
 import kotlin.time.Duration.Companion.seconds
 
+object FrozenKeyDeliverySuite : Suite() {
+    init {
+        test("an already frozen enrolled receipt replays without starting another worker") {
+            val source = byteArrayOf(4, 8)
+            withLoadGroups(listOf(source)) { ledger, flights, key, captured ->
+                val armed = HandoffDecision<Unit>()
+                val settledByWorker = HandoffDecision<Unit>()
+                val loads = Shared(0)
+                val caller = Thread.currentThread()
+                val held = resource {
+                    val receipt = ledger.enrol(key, captured, groupDeadline).bind()
+                    runGroup(ledger, flights, key, captured) {
+                        loads.update { it + 1 }
+                        Either.Right(DataKey(key.slot.owner, key.slot.purpose, 1, source))
+                    }
+                    armed.tryComplete(Unit)
+                    receipt
+                }
+                val previous = metrics.get()
+                val observer = object : Metrics by previous {
+                    override fun counter(name: String, tags: Map<String, String>): Counter = Counter { count ->
+                        previous.counter(name, tags).increment(count)
+                        val thread = Thread.currentThread()
+                        val commit = name == "surefold.transact.runs" && tags["outcome"] == "committed"
+                        if (commit && thread !== caller && armed.peek() == Unit && thread.stackTrace.any { frame ->
+                                frame.className == KeyCacheLedger::class.java.name &&
+                                    frame.methodName.substringBefore('$') == "settle"
+                            }
+                        ) {
+                            settledByWorker.tryComplete(Unit)
+                        }
+                    }
+                }
+                resourceScope {
+                    val result = metrics.locally(observer) {
+                        KeyCacheLedger.DeliveryCall.run(KeyCallers(flights), ledger, held) {
+                            error("a frozen receipt must replay the original value")
+                        }
+                    }
+                    val delivery = (result as Either.Right).value
+                    onRelease { _ -> discardDelivery(delivery) }
+                    deliveryBytes(delivery) shouldBe listOf<Byte>(4, 8)
+                    loads.peek() shouldBe 1
+                    settledByWorker.peek() shouldBe null
+                }
+            }
+        }
+    }
+}
+
 object KeyRetentionSuite : Suite() {
     init {
         test("a slower successful load cannot replace a newer success or restore it after removal") {
