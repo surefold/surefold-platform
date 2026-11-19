@@ -9,6 +9,15 @@ dependencies {
 }
 
 tasks.test {
+    val guide = rootProject.layout.projectDirectory.file("docs/tenancy-crypto.md")
+    val example = layout.projectDirectory.file(
+        "src/test/kotlin/dev/surefold/tenancy/crypto/KeyCacheCompatibilitySuite.kt",
+    )
+    inputs.file(guide).withPropertyName("retainedKeyViewsGuide")
+    inputs.file(example).withPropertyName("retainedKeyViewsExample")
+    systemProperty("surefold.tenancy.crypto.keyViewGuide", guide.asFile.absolutePath)
+    systemProperty("surefold.tenancy.crypto.keyViewExample", example.asFile.absolutePath)
+
     val mainRuntime = configurations.runtimeClasspath
     inputs.files(mainRuntime).withPropertyName("mainRuntimeClasspath")
     jvmArgumentProviders.add(
