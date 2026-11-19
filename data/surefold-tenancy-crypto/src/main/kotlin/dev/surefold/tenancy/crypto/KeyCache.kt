@@ -188,7 +188,7 @@ internal class KeyCacheLedger(
     }
     private class SourceRef(val id: Any, val slot: KeyCache.Slot, val source: Source)
     private sealed interface Outcome
-    private class Value(val result: Either<KeyError, SourceRef>) : Outcome
+    private class Value(val result: Either<KeyError, SourceRef>, val coldExpired: Boolean = false) : Outcome
     private class Thrown(val failure: Throwable) : Outcome
     private data class Group(
         val key: LoadKey, val deadline: Instant, val members: Int = 0,
@@ -303,10 +303,8 @@ internal class KeyCacheLedger(
             fun view(
                 callers: KeyCallers, ledger: KeyCacheLedger, receipt: Resource<Receipt>,
                 load: () -> Either<KeyError, DataKey>,
-            ): Either<KeyError, KeyView> {
-                val call = DeliveryCall(ledger, receipt, load) { (it as Delivery.View).view }
-                return callers.deliver(call)
-            }
+            ): Either<KeyError, KeyView> =
+                callers.deliver(DeliveryCall(ledger, receipt, load) { (it as Delivery.View).view })
         }
     }
 
@@ -320,9 +318,11 @@ internal class KeyCacheLedger(
         ) replay(frozen) else flights.run(receipt.group) { settle(receipt, load) }.flatMap {
             replay(checkNotNull(state.peek().groups[receipt.group]?.outcome))
         }
-        if (state.peek().groups.getValue(receipt.group).revoked) return Either.Left(viewDenied)
+        val settled = state.peek().groups.getValue(receipt.group)
+        if (settled.revoked) return Either.Left(viewDenied)
         val stale = group.captured ?: return answer
         if (answer !is Either.Left || answer.value !is KeyError.Unavailable) return answer
+        if ((settled.outcome as? Value)?.coldExpired == true) return answer
         if (receipt.clock.now() >= stale.loadedAt + hard) {
             state.update { it.drop(stale) }
             return answer
@@ -480,10 +480,7 @@ internal class KeyCacheLedger(
     fun evict(owner: KeyOwner) = resourceScope {
         checkNotInTransaction()
         onRelease { _ -> drain() }
-        state.update { current ->
-            val qualified = current.records.values.any { it.slot.owner == owner && it.source is Qualified }
-            if (qualified) current else current.retention.forget(owner).let { current.retain(it.policy, it.displaced) }
-        }
+        state.update { current -> current.retention.forget(owner).let { current.retain(it.policy, it.displaced) } }
     }
 
     fun revoke(owner: KeyOwner?) = resourceScope {
@@ -533,9 +530,10 @@ internal class KeyCacheLedger(
                         val held = checkNotNull(current.groups[receipt.group])
                         val frozen = if (held.revoked) Either.Left(viewDenied) else result
                         val source = frozen.getOrNull()
+                        val expired = loaded is Either.Right && (frozen as? Either.Left)?.value === viewExpired
                         current.copy(
                             open = current.open.filterValues { it !== receipt.group },
-                            groups = current.groups + (receipt.group to held.copy(outcome = Value(frozen))),
+                            groups = current.groups + (receipt.group to held.copy(outcome = Value(frozen, expired))),
                             records = if (source == null) current.records else current.records + (id to source),
                         ).publish(held, frozen, loadedAt) to frozen
                     }.map { Unit }
@@ -552,10 +550,12 @@ internal class KeyCacheLedger(
         val slot = group.key.slot
         val identity = group.key.identity ?: return Either.Right(SourceRef(id, slot, Legacy(key)))
         val deadline = group.admission?.let { at + hard }
-        if (deadline != null && clock.now() >= deadline) return Either.Left(viewExpired)
         return OwnedKeyMaterial.take(identity, key, deadline ?: group.deadline) {
             state.update { it.copy(records = it.records - id).dropSource(slot, id) }
-        }.map { SourceRef(id, slot, Qualified(it, deadline)) }
+        }.flatMap { material ->
+            if (deadline != null && clock.now() >= deadline) Either.Left(viewExpired)
+            else Either.Right(SourceRef(id, slot, Qualified(material, deadline)))
+        }
     }
 
     private fun State.dropSource(slot: KeyCache.Slot, id: Any): State =
