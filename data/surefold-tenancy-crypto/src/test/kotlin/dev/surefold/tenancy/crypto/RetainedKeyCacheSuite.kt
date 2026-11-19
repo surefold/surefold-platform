@@ -24,6 +24,7 @@ import dev.surefold.junit.shouldBe
 import dev.surefold.junit.shouldBeLeft
 import dev.surefold.junit.shouldThrow
 import dev.surefold.metrics
+import dev.surefold.resource
 import dev.surefold.resourceScope
 import dev.surefold.scope
 import dev.surefold.takingTurns
@@ -587,6 +588,38 @@ object RetainedKeyCacheSuite : Suite() {
 internal object RetainedKeyDeliverySuite : Suite(concurrent = false, isolated = true) {
     init {
         test("a returned copy survives release of its source") { returnedCopySurvives() }
+        test("a caller release after preparation aborts its exact copy") {
+            val source = byteArrayOf(3, 4, 5)
+            val seen = Shared<ByteArray?>(null)
+            val marker = IllegalStateException("caller receipt release")
+            withLoadGroups(listOf(source)) { ledger, flights, key, captured ->
+                val callers = KeyCallers(flights)
+                val held = resource {
+                    onRelease { _ -> throw marker }
+                    ledger.enrol(key, captured, groupDeadline).bind()
+                }
+                resourceScope {
+                    onRelease { _ -> seen.peek()?.fill(0) }
+                    shouldThrow<IllegalStateException>({
+                        atDeliveryCommit({ stack -> stack.any { it.methodName == "registerPrepared" } }, {
+                            val state = privateField(ledger, "state") as Shared<*>
+                            val rows = privateField(state.peek(), "prepared") as List<*>
+                            seen.update { snapshotPreparedCopy(rows) }
+                        }) {
+                            callers.call {
+                                held.use {
+                                    ledger.deliver(key, captured, groupDeadline, flights) {
+                                        Either.Right(DataKey(KeyOwner.Platform, KeyPurpose.Enc, 1, source))
+                                    }
+                                }
+                            }
+                        }
+                    }) { (it === marker) shouldBe true }
+                    callers.closeAndAwait()
+                    checkNotNull(seen.peek()).toList() shouldBe listOf<Byte>(0, 0, 0)
+                }
+            }
+        }
         test("a returned view survives forgetting its source") { returnedViewSurvives() }
         test("receipt cleanup failure wipes a legacy copy that was never returned") { abandonedCopyWipes() }
         test("receipt cleanup failure closes a qualified view that was never returned") { abandonedViewCloses() }
