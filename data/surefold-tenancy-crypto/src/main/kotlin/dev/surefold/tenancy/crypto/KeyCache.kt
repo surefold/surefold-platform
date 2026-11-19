@@ -231,23 +231,22 @@ internal class KeyCacheLedger {
         load: () -> Either<KeyError, DataKey>,
     ): Either<KeyError, Delivery> = DeliveryCall.direct(this, enrol(key, capturedClock, deadline), flights, load)
 
-    internal class DeliveryCall private constructor(
+    internal class DeliveryCall<A> private constructor(
         private val ledger: KeyCacheLedger,
         private val receipt: Resource<Receipt>,
         private val load: () -> Either<KeyError, DataKey>,
+        private val project: (Delivery) -> A,
     ) {
         private val decision = HandoffDecision<ReturnDecision>()
         private var row: Prepared? = null
 
-        fun prepare(flights: SingleFlight<Any, KeyError, Unit>): Either<KeyError, Delivery> = receipt.use { admitted ->
-            flights.run(admitted.group) { ledger.settle(admitted, load) }.flatMap {
-                ledger.replay(checkNotNull(ledger.state.peek().groups[admitted.group]?.outcome)).flatMap { ref ->
-                    when (val held = ref.source) {
-                        is Legacy -> copy(held.key)
-                        is Qualified -> held.material.borrow(admitted.clock, ::register).map { Delivery.View(it) }
-                    }
+        fun prepare(flights: SingleFlight<Any, KeyError, Unit>): Either<KeyError, A> = receipt.use { admitted ->
+            ledger.awaitSource(admitted, flights, load).flatMap { ref ->
+                when (val held = ref.source) {
+                    is Legacy -> copy(held.key)
+                    is Qualified -> held.material.borrow(admitted.clock, ::register).map { Delivery.View(it) }
                 }
-            }
+            }.map(project)
         }
 
         private fun copy(key: DataKey): Either<KeyError, Delivery> = resourceScope {
@@ -279,7 +278,7 @@ internal class KeyCacheLedger {
                 ledger: KeyCacheLedger, receipt: Resource<Receipt>,
                 flights: SingleFlight<Any, KeyError, Unit>, load: () -> Either<KeyError, DataKey>,
             ): Either<KeyError, Delivery> {
-                val call = DeliveryCall(ledger, receipt, load)
+                val call = DeliveryCall(ledger, receipt, load) { it }
                 val answer = resourceScope {
                     var ready = false
                     onRelease { _ -> if (!ready && call.chooseAbort()) call.abort() }
@@ -292,7 +291,25 @@ internal class KeyCacheLedger {
             fun run(
                 callers: KeyCallers, ledger: KeyCacheLedger, receipt: Resource<Receipt>,
                 load: () -> Either<KeyError, DataKey>,
-            ): Either<KeyError, Delivery> = callers.deliver(DeliveryCall(ledger, receipt, load))
+            ): Either<KeyError, Delivery> = callers.deliver(DeliveryCall(ledger, receipt, load) { it })
+
+            fun copy(
+                callers: KeyCallers, ledger: KeyCacheLedger, receipt: Resource<Receipt>,
+                load: () -> Either<KeyError, DataKey>,
+            ): Either<KeyError, DataKey> {
+                val call = DeliveryCall(ledger, receipt, load) { (it as Delivery.Copy).key }
+                return callers.deliver(call)
+            }
+        }
+    }
+
+    private fun awaitSource(
+        receipt: Receipt, flights: SingleFlight<Any, KeyError, Unit>, load: () -> Either<KeyError, DataKey>,
+    ): Either<KeyError, SourceRef> {
+        val frozen = state.peek().groups.getValue(receipt.group).outcome
+        if (frozen != null) return replay(frozen)
+        return flights.run(receipt.group) { settle(receipt, load) }.flatMap {
+            replay(checkNotNull(state.peek().groups[receipt.group]?.outcome))
         }
     }
 
@@ -720,13 +737,13 @@ internal class KeyCallers(private val flights: SingleFlight<Any, KeyError, Unit>
             body()
         }
 
-        fun abort(call: KeyCacheLedger.DeliveryCall) {
+        fun abort(call: KeyCacheLedger.DeliveryCall<*>) {
             if (call.chooseAbort()) withinOwner(call::abort)
         }
 
         // The failed cleanup must carry the caller's original failure, with distinct diagnostics.
         @Suppress("ThrowingExceptionFromFinally")
-        fun abortAfterFailure(call: KeyCacheLedger.DeliveryCall, primary: Throwable) {
+        fun abortAfterFailure(call: KeyCacheLedger.DeliveryCall<*>, primary: Throwable) {
             var abortFailed = false
             try {
                 onThrow({ cleanup ->
@@ -754,7 +771,7 @@ internal class KeyCallers(private val flights: SingleFlight<Any, KeyError, Unit>
         }
     }
 
-    fun deliver(call: KeyCacheLedger.DeliveryCall): Either<KeyError, KeyCacheLedger.Delivery> {
+    fun <A> deliver(call: KeyCacheLedger.DeliveryCall<A>): Either<KeyError, A> {
         checkNotInTransaction()
         val accepted = AcceptedCall()
         try {

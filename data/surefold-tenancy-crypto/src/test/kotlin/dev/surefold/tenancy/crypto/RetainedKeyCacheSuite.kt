@@ -62,12 +62,13 @@ object FrozenKeyDeliverySuite : Suite() {
                         previous.counter(name, tags).increment(count)
                         val thread = Thread.currentThread()
                         val commit = name == "surefold.transact.runs" && tags["outcome"] == "committed"
-                        if (commit && thread !== caller && armed.peek() == Unit && thread.stackTrace.any { frame ->
+                        val recording = commit && thread !== caller && armed.peek() == Unit
+                        if (recording) {
+                            val settling = thread.stackTrace.any { frame ->
                                 frame.className == KeyCacheLedger::class.java.name &&
                                     frame.methodName.substringBefore('$') == "settle"
                             }
-                        ) {
-                            settledByWorker.tryComplete(Unit)
+                            if (settling) settledByWorker.tryComplete(Unit)
                         }
                     }
                 }
@@ -82,6 +83,25 @@ object FrozenKeyDeliverySuite : Suite() {
                     deliveryBytes(delivery) shouldBe listOf<Byte>(4, 8)
                     loads.peek() shouldBe 1
                     settledByWorker.peek() shouldBe null
+                }
+            }
+        }
+
+        test("a typed copy survives source cleanup and a later prepared-row reap") {
+            val source = byteArrayOf(3, 9)
+            withLoadGroups(listOf(source)) { ledger, flights, key, captured ->
+                resourceScope {
+                    val receipt = ledger.enrol(key, captured, groupDeadline)
+                    val result = KeyCacheLedger.DeliveryCall.copy(KeyCallers(flights), ledger, receipt) {
+                        Either.Right(DataKey(key.slot.owner, key.slot.purpose, 1, source))
+                    }
+                    val copy = (result as Either.Right).value
+                    onRelease { _ -> copy.material.fill(0) }
+                    ledger.drain()
+
+                    source.toList() shouldBe listOf<Byte>(0, 0)
+                    copy.material.toList() shouldBe listOf<Byte>(3, 9)
+                    (copy.material === source) shouldBe false
                 }
             }
         }
