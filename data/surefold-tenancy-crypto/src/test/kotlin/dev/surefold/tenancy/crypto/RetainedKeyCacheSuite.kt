@@ -39,6 +39,26 @@ import kotlin.time.Duration.Companion.seconds
 
 object RetainedKeyCacheSuite : Suite() {
     init {
+        test("a slower successful load cannot replace a newer success or restore it after removal") {
+            val slot = KeyCache.Slot(KeyOwner.Platform, KeyPurpose.Enc, 1)
+            val old = KeyRetention(1).admit(slot, Any())
+            val newer = old.policy.admit(slot, Any())
+            val recentSource = Any()
+            val at = Instant.EPOCH.plusSeconds(10)
+            val recent = newer.policy.publish(newer.admission, recentSource, at)
+            val later = recent.policy.publish(old.admission, Any(), Instant.EPOCH)
+
+            val held = later.policy.admit(slot, Any()).admission.captured
+            (held?.sourceId === recentSource) shouldBe true
+            later.accepted shouldBe false
+            later.displaced shouldBe null
+            val dropped = later.policy.drop(checkNotNull(held))
+            dropped.displaced shouldBe listOf(held)
+            val stale = dropped.policy.publish(old.admission, Any(), Instant.EPOCH)
+            stale.accepted shouldBe false
+            stale.policy.admit(slot, Any()).admission.captured shouldBe null
+        }
+
         test("an owed release waits for an explicit drain") {
             val ledger = KeyCacheLedger()
             val calls = Shared(0)
