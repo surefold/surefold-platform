@@ -1140,6 +1140,10 @@ object RetainedKeyCallersSuite : Suite(concurrent = false, isolated = true) {
 
 object RetainedKeyCallersCloseSuite : Suite(concurrent = false, isolated = true) {
     init {
+        test("close retries an interrupted acknowledgement without repeating its action") {
+            interruptedCloseAcknowledgement()
+        }
+
         listOf(false, true).forEach { stop ->
             test("atomic caller fence captures late admission and cleans up after assertion: $stop") {
                 val probe = CallerFenceProbe()
@@ -1673,6 +1677,70 @@ private fun privateField(owner: Any?, name: String): Any = try {
 }
 
 private class DeliveryProbeSetupFailure : IllegalStateException("synthetic delivery probe setup failed")
+
+@OptIn(TurnSeam::class)
+private fun interruptedCloseAcknowledgement() = clock.locally(SystemClock) {
+    timeout(10.seconds) {
+        val ledger = KeyCacheLedger()
+        val callers = KeyCallers(SingleFlight())
+        val actions = Shared(0)
+        val release = TestClock(Instant.EPOCH)
+        val start = Promise<Nothing, Unit>()
+        val holderReady = Promise<Nothing, Thread>()
+        val interrupted = HandoffDecision<Unit>()
+        scope {
+            val blocker = async { release.sleep(1.seconds) }
+            eventually(5.seconds) { release.sleepers() shouldBe 1 }
+            val holder = async {
+                holderReady.succeed(Thread.currentThread())
+                start.awaitValue()
+                transact(soloAfter = 0) { blocker.await() }
+            }
+            resourceScope {
+                onRelease { _ -> release.adjust(1.seconds) }
+                val holderThread = holderReady.awaitValue()
+                ledger.owe {
+                    actions.update { it + 1 }
+                    start.succeed(Unit)
+                    eventually(5.seconds) { (LockSupport.getBlocker(holderThread) === blocker) shouldBe true }
+                }
+                val closer = async {
+                    takingTurns(InterruptCloseAck(Thread.currentThread(), interrupted)) {
+                        callers.closeAndAwait(ledger)
+                    }
+                    Thread.interrupted()
+                }
+                eventually(5.seconds) { interrupted.peek() shouldBe Unit }
+                release.adjust(1.seconds)
+                holder.await()
+                closer.await() shouldBe true
+                ledger.drain()
+                actions.peek() shouldBe 1
+            }
+        }
+    }
+}
+
+@OptIn(TurnSeam::class)
+private class InterruptCloseAck(private val closer: Thread, private val interrupted: HandoffDecision<Unit>) : Turns {
+    override fun forking(): Any = this
+    override fun started(ticket: Any) = Unit
+    override fun ended() = Unit
+    override fun woke() = Unit
+    override fun waking(thread: Thread) = Unit
+
+    override fun parking(): Boolean {
+        if (Thread.currentThread() !== closer) return true
+        val stack = closer.stackTrace
+        val acknowledgement = stack.any { it.methodName == "acknowledge" }
+        val committing = stack.any { it.className.endsWith(".Transaction") && it.methodName.substringBefore('$') == "commit" }
+        val held = stack.any { it.className.endsWith(".Solo") && it.methodName == "awaitFree" }
+        if (!acknowledgement || !committing || !held || !interrupted.tryComplete(Unit)) return true
+        closer.interrupt()
+        return false
+    }
+}
+
 
 private fun <A> revokePreparedView(ledger: KeyCacheLedger, block: () -> A): A =
     atDeliveryCommit({ stack -> stack.any { it.methodName == "registerPrepared" } }, {

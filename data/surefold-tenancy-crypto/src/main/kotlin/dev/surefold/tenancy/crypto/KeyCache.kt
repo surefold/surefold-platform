@@ -548,6 +548,11 @@ internal class KeyCallers(private val flights: SingleFlight<Any, KeyError, Unit>
         }
     }
 
+    fun closeAndAwait(ledger: KeyCacheLedger) {
+        closeAndAwait()
+        ledger.drain()
+    }
+
     // Capture inside the owner binding before restoration can mask it; outer capture retains restoration too.
     @Suppress("TooGenericExceptionCaught")
     fun closeAndAwait() {
