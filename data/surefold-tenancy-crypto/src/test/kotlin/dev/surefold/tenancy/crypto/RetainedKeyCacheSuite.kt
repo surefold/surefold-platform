@@ -606,18 +606,117 @@ internal object RetainedKeyDeliverySuite : Suite(concurrent = false, isolated = 
                             val rows = privateField(state.peek(), "prepared") as List<*>
                             seen.update { snapshotPreparedCopy(rows) }
                         }) {
-                            callers.call {
-                                held.use {
-                                    ledger.deliver(key, captured, groupDeadline, flights) {
-                                        Either.Right(DataKey(KeyOwner.Platform, KeyPurpose.Enc, 1, source))
-                                    }
-                                }
+                            KeyCacheLedger.DeliveryCall.run(callers, ledger, held) {
+                                Either.Right(DataKey(KeyOwner.Platform, KeyPurpose.Enc, 1, source))
                             }
                         }
                     }) { (it === marker) shouldBe true }
                     callers.closeAndAwait()
                     checkNotNull(seen.peek()).toList() shouldBe listOf<Byte>(0, 0, 0)
                 }
+            }
+        }
+        test("a refused qualified delivery aborts its registered row under the caller owner") {
+            val source = byteArrayOf(3, 4, 5)
+            val aborted = Shared(false)
+            withLoadGroups(listOf(source)) { ledger, flights, legacy, captured ->
+                val callers = KeyCallers(flights)
+                val key = deliveryKey(legacy, true)
+                val answer = atDeliveryCommit({ stack -> stack.any { it.methodName == "abortPrepared" } }, {
+                    shouldThrow<IllegalStateException>({ callers.closeAndAwait() }) {
+                        it.message shouldBe "a key cache caller cannot close its owner"
+                    }
+                    aborted.update { true }
+                }) {
+                    revokePreparedView(ledger) {
+                        KeyCacheLedger.DeliveryCall.run(callers, ledger, ledger.enrol(key, captured, groupDeadline)) {
+                            Either.Right(DataKey(KeyOwner.Platform, KeyPurpose.Enc, 1, source))
+                        }
+                    }
+                }
+                answer shouldBeLeft KeyError.Denied("the key view is unavailable")
+                aborted.peek() shouldBe true
+                source.all { it == 0.toByte() } shouldBe true
+                val state = privateField(ledger, "state") as Shared<*>
+                (privateField(state.peek(), "prepared") as List<*>).isEmpty() shouldBe true
+                callers.closeAndAwait()
+            }
+        }
+        test("a caller release failure retains the exact abort that also failed") {
+            val source = byteArrayOf(3, 4, 5)
+            val original = IllegalStateException("caller receipt release")
+            val cleanup = IllegalArgumentException("caller view cleanup")
+            withLoadGroups(listOf(source)) { ledger, flights, legacy, captured ->
+                val callers = KeyCallers(flights)
+                val held = resource {
+                    onRelease { _ -> throw original }
+                    ledger.enrol(deliveryKey(legacy, true), captured, groupDeadline).bind()
+                }
+                shouldThrow<IllegalStateException>({
+                    atDeliveryCommit({ stack ->
+                        stack.any { it.methodName == "abortPrepared" } &&
+                            stack.any { it.className.endsWith("OwnedKeyMaterial") }
+                    }, { throw cleanup }) {
+                        KeyCacheLedger.DeliveryCall.run(callers, ledger, held) {
+                            Either.Right(DataKey(KeyOwner.Platform, KeyPurpose.Enc, 1, source))
+                        }
+                    }
+                }) {
+                    (it === original) shouldBe true
+                    (it.suppressed.singleOrNull() === cleanup) shouldBe true
+                }
+                val state = privateField(ledger, "state") as Shared<*>
+                (privateField(state.peek(), "pending") as List<*>).size shouldBe 1
+                ledger.drain()
+                (privateField(state.peek(), "pending") as List<*>).isEmpty() shouldBe true
+                source.all { it == 0.toByte() } shouldBe true
+                callers.closeAndAwait()
+            }
+        }
+        test("a clean qualified refusal surfaces its exact abort failure") {
+            val source = byteArrayOf(3, 4, 5)
+            val cleanup = IllegalStateException("refused view cleanup")
+            withLoadGroups(listOf(source)) { ledger, flights, legacy, captured ->
+                val callers = KeyCallers(flights)
+                val held = ledger.enrol(deliveryKey(legacy, true), captured, groupDeadline)
+                shouldThrow<IllegalStateException>({
+                    atDeliveryCommit({ stack ->
+                        stack.any { it.methodName == "abortPrepared" } &&
+                            stack.any { it.className.endsWith("OwnedKeyMaterial") }
+                    }, { throw cleanup }) {
+                        revokePreparedView(ledger) {
+                            KeyCacheLedger.DeliveryCall.run(callers, ledger, held) {
+                                Either.Right(DataKey(KeyOwner.Platform, KeyPurpose.Enc, 1, source))
+                            }
+                        }
+                    }
+                }) { (it === cleanup) shouldBe true }
+                val state = privateField(ledger, "state") as Shared<*>
+                (privateField(state.peek(), "pending") as List<*>).size shouldBe 1
+                ledger.drain()
+                (privateField(state.peek(), "pending") as List<*>).isEmpty() shouldBe true
+                callers.closeAndAwait()
+            }
+        }
+
+        test("a delivered caller view survives reaping its exact prepared row") {
+            val source = byteArrayOf(3, 4, 5)
+            withLoadGroups(listOf(source)) { ledger, flights, legacy, captured ->
+                val callers = KeyCallers(flights)
+                val held = ledger.enrol(deliveryKey(legacy, true), captured, groupDeadline)
+                val answer = KeyCacheLedger.DeliveryCall.run(callers, ledger, held) {
+                    Either.Right(DataKey(KeyOwner.Platform, KeyPurpose.Enc, 1, source))
+                }
+                val view = ((answer as Either.Right).value as KeyCacheLedger.Delivery.View).view
+                resourceScope {
+                    onRelease { _ -> view.close() }
+                    ledger.drain()
+                    val state = privateField(ledger, "state") as Shared<*>
+                    (privateField(state.peek(), "prepared") as List<*>).isEmpty() shouldBe true
+                    view.using { it.toList() } shouldBe Either.Right(listOf<Byte>(3, 4, 5))
+                }
+                source.all { it == 0.toByte() } shouldBe true
+                callers.closeAndAwait()
             }
         }
         test("a returned view survives forgetting its source") { returnedViewSurvives() }
@@ -1525,6 +1624,14 @@ private fun privateField(owner: Any?, name: String): Any = try {
 }
 
 private class DeliveryProbeSetupFailure : IllegalStateException("synthetic delivery probe setup failed")
+
+private fun <A> revokePreparedView(ledger: KeyCacheLedger, block: () -> A): A =
+    atDeliveryCommit({ stack -> stack.any { it.methodName == "registerPrepared" } }, {
+        val state = privateField(ledger, "state") as Shared<*>
+        val records = privateField(state.peek(), "records") as Map<*, *>
+        val owner = privateField(records.values.single(), "source")
+        (privateField(owner, "material") as OwnedKeyMaterial).revoke()
+    }, block)
 
 private fun preparingDrain(qualified: Boolean) {
     val source = byteArrayOf(3, 4, 5)
