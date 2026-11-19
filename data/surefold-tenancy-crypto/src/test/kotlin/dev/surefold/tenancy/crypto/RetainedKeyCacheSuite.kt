@@ -1140,6 +1140,136 @@ object RetainedKeyCallersSuite : Suite(concurrent = false, isolated = true) {
 
 object RetainedKeyCallersCloseSuite : Suite(concurrent = false, isolated = true) {
     init {
+        test("close retries an interrupted acknowledgement without repeating its action") {
+            interruptedCloseAcknowledgement()
+        }
+
+        test("a defect after close transfers a prepared abort leaves its exact action pending") {
+            val source = byteArrayOf(3, 4, 5)
+            val original = IllegalStateException("synthetic committed group cleanup")
+            val transferFault = IllegalStateException("close transfer committed")
+            val later = Shared(0)
+            withLoadGroups(listOf(source)) { ledger, flights, legacy, captured ->
+                heldSoloDeliveryFault(false, original) {
+                    ledger.deliver(deliveryKey(legacy, true), captured, groupDeadline, flights) {
+                        Either.Right(DataKey(KeyOwner.Platform, KeyPurpose.Enc, 1, source))
+                    }
+                }
+                ledger.owe { later.update { it + 1 } }
+                shouldThrow<IllegalStateException>({
+                    atDeliveryCommit({ stack -> stack.any { it.methodName == "transferPrepared" } }, {
+                        throw transferFault
+                    }) { KeyCallers(flights).closeAndAwait(ledger) }
+                }) { (it === transferFault) shouldBe true }
+                source.any { it != 0.toByte() } shouldBe true
+                later.peek() shouldBe 1
+                ledger.drain()
+                source.all { it == 0.toByte() } shouldBe true
+            }
+        }
+
+        test("close reaps delivered metadata and leaves its returned copy live") {
+            val source = byteArrayOf(3, 4, 5)
+            withLoadGroups(listOf(source)) { ledger, flights, key, captured ->
+                val callers = KeyCallers(flights)
+                val held = ledger.enrol(key, captured, groupDeadline)
+                val answer = KeyCacheLedger.DeliveryCall.run(callers, ledger, held) {
+                    Either.Right(DataKey(KeyOwner.Platform, KeyPurpose.Enc, 1, source))
+                }
+                val copy = ((answer as Either.Right).value as KeyCacheLedger.Delivery.Copy).key.material
+                resourceScope {
+                    onRelease { _ -> copy.fill(0) }
+                    callers.closeAndAwait(ledger)
+                    val state = privateField(ledger, "state") as Shared<*>
+                    (privateField(state.peek(), "prepared") as List<*>).isEmpty() shouldBe true
+                    copy.toList() shouldBe listOf<Byte>(3, 4, 5)
+                }
+            }
+        }
+
+        test("close keeps its snapshot and an acknowledged action is never replayed") {
+            val ledger = KeyCacheLedger()
+            val callers = KeyCallers(SingleFlight())
+            val actions = Shared(emptyList<String>())
+            resourceScope {
+                onRelease { _ -> Thread.interrupted() }
+                ledger.owe {
+                    val first = actions.modify { it + "action" to it.isEmpty() }
+                    if (first) {
+                        ledger.owe { actions.update { it + "new" } }
+                        throw InterruptedException("interrupt action before return")
+                    }
+                }
+                ledger.owe { actions.update { it + "later" } }
+                atDeliveryCommit({ stack -> stack.any { it.methodName == "acknowledge" } }, {
+                    throw InterruptedException("interrupt after acknowledgement commits")
+                }) { callers.closeAndAwait(ledger) }
+                Thread.interrupted() shouldBe true
+                actions.peek() shouldBe listOf("action", "action", "later")
+                ledger.drain()
+                actions.peek() shouldBe listOf("action", "action", "later", "new")
+            }
+        }
+
+        test("a mixed close fault leaves that intent pending and attempts the other intent") {
+            val ledger = KeyCacheLedger()
+            val callers = KeyCallers(SingleFlight())
+            val attempts = Shared(0)
+            val later = Shared(0)
+            val defect = IllegalStateException("close cleanup defect")
+            val mixed = InterruptedException("mixed cleanup").apply { addSuppressed(defect) }
+            resourceScope {
+                onRelease { _ -> Thread.interrupted() }
+                ledger.owe {
+                    if (attempts.modify { it + 1 to (it == 0) }) throw mixed
+                }
+                ledger.owe { later.update { it + 1 } }
+                shouldThrow<IllegalStateException>({ callers.closeAndAwait(ledger) }) { (it === defect) shouldBe true }
+                Thread.interrupted() shouldBe true
+                attempts.peek() shouldBe 1
+                later.peek() shouldBe 1
+                ledger.drain()
+                attempts.peek() shouldBe 2
+                later.peek() shouldBe 1
+            }
+        }
+
+        test("close does not retry an interrupted action after another drain acknowledges it") {
+            val ledger = KeyCacheLedger()
+            val callers = KeyCallers(SingleFlight())
+            val attempts = Shared(0)
+            val later = Shared(0)
+            val entered = Promise<Nothing, Unit>()
+            val resume = Promise<Nothing, Unit>()
+            val leaveLaterPending = IllegalStateException("leave the other captured item pending")
+            scope {
+                resourceScope {
+                    onRelease { _ -> resume.succeed(Unit) }
+                    ledger.owe {
+                        if (attempts.modify { it + 1 to (it == 0) }) {
+                            entered.succeed(Unit)
+                            resume.awaitValue()
+                            throw InterruptedException("first close attempt")
+                        }
+                    }
+                    ledger.owe {
+                        if (later.modify { it + 1 to (it == 0) }) throw leaveLaterPending
+                    }
+                    val closing = async {
+                        callers.closeAndAwait(ledger)
+                        Thread.interrupted()
+                    }
+                    entered.awaitValue()
+                    shouldThrow<IllegalStateException>({ ledger.drain() }) { (it === leaveLaterPending) shouldBe true }
+                    resume.succeed(Unit)
+                    closing.await() shouldBe true
+                    ledger.drain()
+                    attempts.peek() shouldBe 2
+                    later.peek() shouldBe 2
+                }
+            }
+        }
+
         listOf(false, true).forEach { stop ->
             test("atomic caller fence captures late admission and cleans up after assertion: $stop") {
                 val probe = CallerFenceProbe()
@@ -1673,6 +1803,73 @@ private fun privateField(owner: Any?, name: String): Any = try {
 }
 
 private class DeliveryProbeSetupFailure : IllegalStateException("synthetic delivery probe setup failed")
+
+@OptIn(TurnSeam::class)
+private fun interruptedCloseAcknowledgement() = clock.locally(SystemClock) {
+    timeout(10.seconds) {
+        val ledger = KeyCacheLedger()
+        val callers = KeyCallers(SingleFlight())
+        val actions = Shared(0)
+        val release = TestClock(Instant.EPOCH)
+        val start = Promise<Nothing, Unit>()
+        val holderReady = Promise<Nothing, Thread>()
+        val interrupted = HandoffDecision<Unit>()
+        scope {
+            val blocker = async { release.sleep(1.seconds) }
+            eventually(5.seconds) { release.sleepers() shouldBe 1 }
+            val holder = async {
+                holderReady.succeed(Thread.currentThread())
+                start.awaitValue()
+                transact(soloAfter = 0) { blocker.await() }
+            }
+            resourceScope {
+                onRelease { _ -> release.adjust(1.seconds) }
+                val holderThread = holderReady.awaitValue()
+                ledger.owe {
+                    actions.update { it + 1 }
+                    start.succeed(Unit)
+                    eventually(5.seconds) { (LockSupport.getBlocker(holderThread) === blocker) shouldBe true }
+                }
+                val closer = async {
+                    takingTurns(InterruptCloseAck(Thread.currentThread(), interrupted)) {
+                        callers.closeAndAwait(ledger)
+                    }
+                    Thread.interrupted()
+                }
+                eventually(5.seconds) { interrupted.peek() shouldBe Unit }
+                release.adjust(1.seconds)
+                holder.await()
+                closer.await() shouldBe true
+                ledger.drain()
+                actions.peek() shouldBe 1
+            }
+        }
+    }
+}
+
+@OptIn(TurnSeam::class)
+private class InterruptCloseAck(private val closer: Thread, private val interrupted: HandoffDecision<Unit>) : Turns {
+    override fun forking(): Any = this
+    override fun started(ticket: Any) = Unit
+    override fun ended() = Unit
+    override fun woke() = Unit
+    override fun waking(thread: Thread) = Unit
+
+    override fun parking(): Boolean {
+        if (Thread.currentThread() !== closer) return true
+        val stack = closer.stackTrace
+        val acknowledgement = stack.any { it.methodName == "acknowledge" }
+        val committing = stack.any {
+            it.className.endsWith(".Transaction") &&
+                it.methodName.substringBefore('$') == "commit"
+        }
+        val held = stack.any { it.className.endsWith(".Solo") && it.methodName == "awaitFree" }
+        if (!acknowledgement || !committing || !held) return true
+        if (!interrupted.tryComplete(Unit)) return true
+        closer.interrupt()
+        return false
+    }
+}
 
 private fun <A> revokePreparedView(ledger: KeyCacheLedger, block: () -> A): A =
     atDeliveryCommit({ stack -> stack.any { it.methodName == "registerPrepared" } }, {

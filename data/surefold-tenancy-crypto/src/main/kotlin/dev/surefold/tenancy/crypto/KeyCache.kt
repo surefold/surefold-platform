@@ -218,12 +218,18 @@ internal class KeyCacheLedger {
                 acknowledge(row.abort)
             }
         }
-        state.update { current ->
-            if (current.prepared.none { it.id === row.id }) current
-            else current.copy(
-                prepared = current.prepared.filterNot { it.id === row.id }, pending = current.pending + row.abort,
-            )
-        }
+        transferPrepared(row)
+    }
+
+    private fun transferPrepared(row: Prepared) = state.update { current ->
+        if (current.prepared.none { it.id === row.id }) current
+        else current.copy(
+            prepared = current.prepared.filterNot { it.id === row.id }, pending = current.pending + row.abort,
+        )
+    }
+
+    private fun reapPrepared(row: Prepared) = state.update { current ->
+        current.copy(prepared = current.prepared.filterNot { it.id === row.id })
     }
 
     private fun acknowledge(intent: ReleaseIntent) = state.update { current ->
@@ -242,11 +248,7 @@ internal class KeyCacheLedger {
             onRelease { _ ->
                 when (phase) {
                     null -> Unit
-
-                    ReturnDecision.Delivered -> state.update { current ->
-                        current.copy(prepared = current.prepared.filterNot { it.id === row.id })
-                    }
-
+                    ReturnDecision.Delivered -> reapPrepared(row)
                     ReturnDecision.Abort -> abortPrepared(row)
                 }
             }
@@ -256,6 +258,32 @@ internal class KeyCacheLedger {
                 intent.action()
                 acknowledge(intent)
             }
+        }
+    }
+
+    fun drainAfterClose(runPhase: (action: () -> Unit, committed: () -> Boolean) -> Boolean) {
+        val snapshot = state.peek()
+        val rows = snapshot.prepared.map { it to it.decision.peek() }
+        rows.forEach { (row, decision) ->
+            val removed = { state.peek().prepared.none { it.id === row.id } }
+            when (decision) {
+                null -> Unit
+
+                ReturnDecision.Delivered -> runPhase({ if (!removed()) reapPrepared(row) }, removed)
+
+                ReturnDecision.Abort -> {
+                    if (runPhase({ if (!removed()) transferPrepared(row) }, removed)) closeIntent(row.abort, runPhase)
+                }
+            }
+        }
+        snapshot.pending.forEach { closeIntent(it, runPhase) }
+    }
+
+    private fun closeIntent(intent: ReleaseIntent, runPhase: (() -> Unit, () -> Boolean) -> Boolean) {
+        val acknowledged = { state.peek().pending.none { it === intent } }
+        // The loop for Ack begins only after the exact action has finished.
+        if (runPhase({ if (!acknowledged()) intent.action() }, acknowledged)) {
+            runPhase({ if (!acknowledged()) acknowledge(intent) }, acknowledged)
         }
     }
 
@@ -457,38 +485,46 @@ internal class KeyCallers(private val flights: SingleFlight<Any, KeyError, Unit>
             interrupted = Thread.interrupted() || interrupted || outcome.observed.any { it is InterruptedException }
         }
 
-        // Each lifecycle attempt retains special unwinding until reconciliation and later stages have run.
-        @Suppress("TooGenericExceptionCaught")
         fun phase(stage: CloseStage) {
+            runPhase({
+                when (stage) {
+                    CloseStage.FENCE -> fence()
+                    CloseStage.STOP -> flights.closeAndJoin()
+                    CloseStage.OBSERVE -> observe()
+                    CloseStage.REAP -> reap()
+                }
+            }, {
+                when (stage) {
+                    CloseStage.FENCE -> {
+                        val current = state.peek()
+                        fenced = current.closed
+                        remaining = current.tickets
+                        fenced
+                    }
+
+                    CloseStage.REAP -> state.peek().tickets.none { ticket -> terminal.any { it === ticket } }
+
+                    CloseStage.STOP, CloseStage.OBSERVE -> false
+                }
+            })
+        }
+
+        fun drain(ledger: KeyCacheLedger) = ledger.drainAfterClose(::runPhase)
+
+        // A mixed fault ends its exact phase even when the state change committed.
+        @Suppress("TooGenericExceptionCaught")
+        private fun runPhase(action: () -> Unit, committed: () -> Boolean): Boolean {
             while (true) {
                 val attempt = Invocation()
                 var done = false
                 try {
-                    when (stage) {
-                        CloseStage.FENCE -> fence()
-                        CloseStage.STOP -> flights.closeAndJoin()
-                        CloseStage.OBSERVE -> observe()
-                        CloseStage.REAP -> reap()
-                    }
+                    action()
                     done = true
                 } catch (failure: Throwable) {
                     attempt.record(failure)
                     outcome.record(failure)
                     try {
-                        when (stage) {
-                            CloseStage.FENCE -> {
-                                val current = state.peek()
-                                fenced = current.closed
-                                remaining = current.tickets
-                                done = fenced
-                            }
-
-                            CloseStage.REAP -> done = state.peek().tickets.none { ticket ->
-                                terminal.any { it === ticket }
-                            }
-
-                            CloseStage.STOP, CloseStage.OBSERVE -> Unit
-                        }
+                        done = committed()
                     } catch (reconciliation: Throwable) {
                         attempt.record(reconciliation)
                         outcome.record(reconciliation)
@@ -497,7 +533,8 @@ internal class KeyCallers(private val flights: SingleFlight<Any, KeyError, Unit>
                     sample()
                 }
                 attempt.refresh()
-                if (done || attempt.observed.any { it !is InterruptedException }) return
+                if (attempt.observed.any { it !is InterruptedException }) return false
+                if (done) return true
             }
         }
 
@@ -548,9 +585,11 @@ internal class KeyCallers(private val flights: SingleFlight<Any, KeyError, Unit>
         }
     }
 
+    fun closeAndAwait() = closeAndAwait(null)
+
     // Capture inside the owner binding before restoration can mask it; outer capture retains restoration too.
     @Suppress("TooGenericExceptionCaught")
-    fun closeAndAwait() {
+    fun closeAndAwait(ledger: KeyCacheLedger?) {
         checkNotInTransaction()
         check(identity !in active.get()) { "a key cache caller cannot close its owner" }
         val closing = Closing()
@@ -560,6 +599,7 @@ internal class KeyCallers(private val flights: SingleFlight<Any, KeyError, Unit>
                 active.locally(active.get() + identity) {
                     try {
                         CloseStage.entries.forEach(closing::phase)
+                        ledger?.let(closing::drain)
                     } catch (failure: Throwable) {
                         closing.outcome.record(failure)
                     }
