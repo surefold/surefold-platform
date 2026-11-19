@@ -312,7 +312,9 @@ internal class KeyCacheLedger(
                 callers: KeyCallers, ledger: KeyCacheLedger, receipt: Resource<Receipt>,
                 load: () -> Either<KeyError, DataKey>,
             ): Either<KeyError, KeyView> =
-                callers.deliver(DeliveryCall(ledger, receipt, load, { Either.Left(viewDenied) }) { (it as Delivery.View).view })
+                callers.deliver(
+                    DeliveryCall(ledger, receipt, load, { Either.Left(viewDenied) }) { (it as Delivery.View).view },
+                )
         }
     }
 
@@ -341,6 +343,7 @@ internal class KeyCacheLedger(
 
     private fun guarded(ref: SourceRef, held: Qualified, view: KeyView): KeyView = object : KeyView by view {
         override fun <A> using(block: (ByteArray) -> A): Either<KeyError, A> {
+            if (callers != null) return callers.using { useHeld(block) }
             checkNotInTransaction()
             return useHeld(block)
         }
@@ -462,26 +465,39 @@ internal class KeyCacheLedger(
     private fun enrol(key: LoadKey, clock: Clock, deadline: Instant, retained: Boolean): Resource<Receipt> = resource {
         val id = Any()
         val candidate = Any()
+        if (state.peek().closed) return@resource Receipt(candidate, id, clock, closed = true)
         val inherited = active.get()
         val now = if (retained) clock.now() else deadline
         onRelease { _ -> finishReceipt(id) }
         val group = state.modify { current ->
-            if (current.closed) return@modify current to null
-            val admitted = if (retained) current.admit(key) else null
-            val loadKey = admitted?.let { key.copy(epoch = it.admission.epoch) } ?: key
-            val fresh = admitted?.admission?.captured?.let { current.hit(it, now) }
-            val token = if (fresh == null) current.open[loadKey] ?: candidate else candidate
-            check(token !in inherited) { "recursive key load" }
-            val held = current.groups[token]
-                ?: Group(loadKey, deadline, outcome = fresh, admission = admitted?.admission)
-            val enrolled = current.copy(
-                open = if (fresh == null) current.open + (loadKey to token) else current.open,
-                receipts = current.receipts + (id to token),
-                groups = current.groups + (token to held.copy(members = held.members + 1)),
-            )
-            enrolled.retain(admitted?.policy ?: current.retention, admitted?.displaced.orEmpty()) to token
+            if (current.closed) current to null
+            else current.enrolReceipt(key, deadline, retained, now, id, candidate, inherited)
         }
         Receipt(group ?: candidate, id, clock, closed = group == null)
+    }
+
+    private fun State.enrolReceipt(
+        key: LoadKey,
+        deadline: Instant,
+        retained: Boolean,
+        now: Instant,
+        id: Any,
+        candidate: Any,
+        inherited: Set<Any>,
+    ): Pair<State, Any> {
+        val admitted = if (retained) admit(key) else null
+        val admission = admitted?.admission
+        val loadKey = if (admission == null) key else key.copy(epoch = admission.epoch)
+        val fresh = admission?.captured?.let { hit(it, now) }
+        val token = if (fresh == null) open[loadKey] ?: candidate else candidate
+        check(token !in inherited) { "recursive key load" }
+        val held = groups[token] ?: Group(loadKey, deadline, outcome = fresh, admission = admission)
+        val enrolled = copy(
+            open = if (fresh == null) open + (loadKey to token) else open,
+            receipts = receipts + (id to token),
+            groups = groups + (token to held.copy(members = held.members + 1)),
+        )
+        return enrolled.retain(admitted?.policy ?: retention, admitted?.displaced.orEmpty()) to token
     }
 
     private fun State.admit(key: LoadKey): KeyRetention.Admitted =
@@ -785,7 +801,9 @@ internal class KeyCallers(private val flights: SingleFlight<Any, KeyError, Unit>
             if (!public) return ledger.drainAfterClose(::runPhase)
             resourceScope {
                 onRelease { _ ->
-                    if (ledger.hasObligations()) outcome.record(IllegalStateException("the key cache cleanup is incomplete"))
+                    if (ledger.hasObligations()) {
+                        outcome.record(IllegalStateException("the key cache cleanup is incomplete"))
+                    }
                 }
                 onThrow(outcome::record) { ledger.drainAfterClose(::runPhase) }
             }

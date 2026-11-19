@@ -1,5 +1,6 @@
 package dev.surefold.tenancy.crypto
 
+import dev.surefold.Clock
 import dev.surefold.Counter
 import dev.surefold.HandoffDecision
 import dev.surefold.Metrics
@@ -18,6 +19,7 @@ import dev.surefold.scope
 import dev.surefold.test.eventually
 import dev.surefold.timeout
 import dev.surefold.transact
+import java.time.Instant
 import java.util.concurrent.locks.LockSupport
 import kotlin.time.Duration.Companion.seconds
 
@@ -85,8 +87,16 @@ object KeyCachePublicCloseSuite : Suite() {
                 scope {
                     onClose { release.succeed(Unit) }
                     val waiting = async {
-                        afterAdmission({ admitted.succeed(Unit); release.awaitValue() }) {
-                            cache.lease(identity) { error("fenced receipt must refuse") }
+                        val clockAfterClose = object : Clock by SystemClock {
+                            override fun now(): Instant = error("fenced receipt must not sample time")
+                        }
+                        clock.locally(clockAfterClose) {
+                            afterAdmission({
+                                admitted.succeed(Unit)
+                                release.awaitValue()
+                            }) {
+                                cache.lease(identity) { error("fenced receipt must refuse") }
+                            }
                         }
                     }
                     admitted.awaitValue()
@@ -109,7 +119,7 @@ object KeyCachePublicCloseSuite : Suite() {
                 scope {
                     onClose { release.succeed(Unit) }
                     val loading = async {
-                        Either.catchOrThrow<InterruptedException, Either<KeyError, KeyView>> {
+                        shouldThrow<InterruptedException> {
                             cache.lease(identity) {
                                 resourceScope {
                                     onRelease { _ -> exited.tryComplete(Unit) }
@@ -129,7 +139,7 @@ object KeyCachePublicCloseSuite : Suite() {
 
                     closing.await() shouldBe true
                     exited.peek() shouldBe Unit
-                    (loading.await() is Either.Left) shouldBe true
+                    loading.await()
                 }
             }
         }
