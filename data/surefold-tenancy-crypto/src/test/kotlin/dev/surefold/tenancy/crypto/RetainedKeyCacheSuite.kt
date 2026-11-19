@@ -36,6 +36,7 @@ import dev.surefold.use
 import java.time.Instant
 import java.util.concurrent.CancellationException
 import java.util.concurrent.locks.LockSupport
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
 object FrozenKeyDeliverySuite : Suite() {
@@ -102,6 +103,154 @@ object FrozenKeyDeliverySuite : Suite() {
                     source.toList() shouldBe listOf<Byte>(0, 0)
                     copy.material.toList() shouldBe listOf<Byte>(3, 9)
                     (copy.material === source) shouldBe false
+                }
+            }
+        }
+    }
+}
+
+object KeyCacheLegacyRetentionSuite : Suite() {
+    private val slot = KeyCache.Slot(KeyOwner.Platform, KeyPurpose.Enc, null)
+
+    private fun loaded(source: ByteArray) = Either.Right(DataKey(slot.owner, slot.purpose, 1, source))
+
+    init {
+        test("a pre-enrolled caller rechecks the hard cutoff after another caller used the fallback") {
+            val time = TestClock()
+            val cache = KeyCache()
+            val source = byteArrayOf(7)
+            val refusal = Either.Left(KeyError.Unavailable("synthetic refresh refusal"))
+            val entered = Promise<Nothing, Unit>()
+            val finishLoad = Promise<Nothing, Unit>()
+            val enrolled = Promise<Nothing, Unit>()
+            val finishWait = Promise<Nothing, Unit>()
+
+            clock.locally(SystemClock) {
+                timeout(10.seconds) {
+                    clock.locally(time) {
+                        cache.get(slot) { loaded(source) }
+                        time.adjust(55.minutes)
+                        scope {
+                            onClose {
+                                finishLoad.succeed(Unit)
+                                finishWait.succeed(Unit)
+                            }
+                            val first = async {
+                                cache.get(slot) {
+                                    entered.succeed(Unit)
+                                    finishLoad.awaitValue()
+                                    refusal
+                                }
+                            }
+                            entered.awaitValue()
+                            val second = async {
+                                atDeliveryCommit({ stack ->
+                                    stack.any { frame ->
+                                        frame.className == KeyCacheLedger::class.java.name &&
+                                            frame.methodName.substringBefore('$') == "enrol"
+                                    }
+                                }, {
+                                    enrolled.succeed(Unit)
+                                    finishWait.awaitValue()
+                                }) {
+                                    cache.get(slot) { error("the pre-enrolled caller must replay the result") }
+                                }
+                            }
+                            enrolled.awaitValue()
+                            finishLoad.succeed(Unit)
+                            val fallback = (first.await() as Either.Right).value
+                            fallback.material.toList() shouldBe listOf<Byte>(7)
+                            time.adjust(6.minutes)
+                            finishWait.succeed(Unit)
+                            (second.await() === refusal) shouldBe true
+                            source.toList() shouldBe listOf<Byte>(0)
+                            fallback.material.toList() shouldBe listOf<Byte>(7)
+                        }
+                    }
+                }
+            }
+        }
+
+        for (outcome in listOf("refuses", "cancels")) {
+            test("forget leaves a stale source owned through a refresh that $outcome") {
+                val time = TestClock()
+                val cache = KeyCache()
+                val source = byteArrayOf(9)
+                val refusal = Either.Left(KeyError.Unavailable("synthetic refresh refusal"))
+                val cancellation = CancellationException("synthetic refresh cancellation")
+                val entered = Promise<Nothing, Unit>()
+                val finishLoad = Promise<Nothing, Unit>()
+
+                clock.locally(SystemClock) {
+                    timeout(10.seconds) {
+                        clock.locally(time) {
+                            val copy = (cache.get(slot) { loaded(source) } as Either.Right).value
+                            time.adjust(55.minutes)
+                            scope {
+                                onClose { finishLoad.succeed(Unit) }
+                                val refresh = async {
+                                    val load = {
+                                        cache.get(slot) {
+                                            entered.succeed(Unit)
+                                            finishLoad.awaitValue()
+                                            if (outcome == "cancels") throw cancellation
+                                            refusal
+                                        }
+                                    }
+                                    if (outcome == "cancels") {
+                                        shouldThrow<CancellationException>({ load() }) {
+                                            (it === cancellation) shouldBe true
+                                        }
+                                    } else {
+                                        (load() === refusal) shouldBe true
+                                    }
+                                }
+                                entered.awaitValue()
+                                cache.evict(slot.owner)
+                                source.toList() shouldBe listOf<Byte>(9)
+                                finishLoad.succeed(Unit)
+                                refresh.await()
+                                source.toList() shouldBe listOf<Byte>(0)
+                                copy.material.toList() shouldBe listOf<Byte>(9)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        test("a late load from the forgotten epoch answers its copy without replacing the fresh epoch") {
+            val cache = KeyCache()
+            val old = byteArrayOf(3)
+            val new = byteArrayOf(7)
+            val entered = Promise<Nothing, Unit>()
+            val finishLoad = Promise<Nothing, Unit>()
+
+            clock.locally(SystemClock) {
+                timeout(10.seconds) {
+                    scope {
+                        onClose { finishLoad.succeed(Unit) }
+                        val pending = async {
+                            cache.get(slot) {
+                                entered.succeed(Unit)
+                                finishLoad.awaitValue()
+                                loaded(old)
+                            }
+                        }
+                        entered.awaitValue()
+                        cache.evict(slot.owner)
+                        val fresh = (cache.get(slot) { loaded(new) } as Either.Right).value
+                        finishLoad.succeed(Unit)
+                        val late = (pending.await() as Either.Right).value
+                        val hit = cache.get(slot) { error("the fresh source must remain cached") }
+                        val retained = (hit as Either.Right).value
+
+                        old.toList() shouldBe listOf<Byte>(0)
+                        late.material.toList() shouldBe listOf<Byte>(3)
+                        fresh.material.toList() shouldBe listOf<Byte>(7)
+                        retained.material.toList() shouldBe listOf<Byte>(7)
+                        (fresh.material === retained.material) shouldBe false
+                    }
                 }
             }
         }
