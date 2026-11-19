@@ -140,44 +140,70 @@ internal class KeyCacheLedger {
         deadline: Instant,
         flights: SingleFlight<Any, KeyError, Unit>,
         load: () -> Either<KeyError, DataKey>,
-    ): Either<KeyError, Delivery> {
-        val decision = HandoffDecision<ReturnDecision>()
-        var row: Prepared? = null
-        var raw: ByteArray? = null
-        return resourceScope {
-            onRelease { _ ->
-                if (decision.peek() != ReturnDecision.Delivered) {
-                    decision.tryComplete(ReturnDecision.Abort)
-                    resourceScope {
-                        onRelease { _ -> raw?.fill(0) }
-                        row?.let { abortPrepared(it) }
-                    }
-                }
-            }
-            val answer = enrol(key, capturedClock, deadline).use { receipt ->
-                flights.run(receipt.group) { settle(receipt, load) }.flatMap {
-                    replay(checkNotNull(state.peek().groups[receipt.group]?.outcome)).flatMap { ref ->
-                        when (val held = ref.source) {
-                            is Legacy -> {
-                                val bytes = held.key.material.copyOf()
-                                raw = bytes
-                                row = Prepared(Any(), decision, ReleaseIntent { bytes.fill(0) })
-                                registerPrepared(checkNotNull(row))
-                                Either.Right(
-                                    Delivery.Copy(DataKey(held.key.owner, held.key.purpose, held.key.version, bytes)),
-                                )
-                            }
+    ): Either<KeyError, Delivery> = DeliveryCall.direct(this, enrol(key, capturedClock, deadline), flights, load)
 
-                            is Qualified -> held.material.borrow(capturedClock) { closeExact ->
-                                row = Prepared(Any(), decision, ReleaseIntent(closeExact))
-                                registerPrepared(checkNotNull(row))
-                            }.map { Delivery.View(it) }
-                        }
+    internal class DeliveryCall private constructor(
+        private val ledger: KeyCacheLedger,
+        private val receipt: Resource<Receipt>,
+        private val load: () -> Either<KeyError, DataKey>,
+    ) {
+        private val decision = HandoffDecision<ReturnDecision>()
+        private var row: Prepared? = null
+
+        fun prepare(flights: SingleFlight<Any, KeyError, Unit>): Either<KeyError, Delivery> = receipt.use { admitted ->
+            flights.run(admitted.group) { ledger.settle(admitted, load) }.flatMap {
+                ledger.replay(checkNotNull(ledger.state.peek().groups[admitted.group]?.outcome)).flatMap { ref ->
+                    when (val held = ref.source) {
+                        is Legacy -> copy(held.key)
+                        is Qualified -> held.material.borrow(admitted.clock, ::register).map { Delivery.View(it) }
                     }
                 }
             }
-            if (answer is Either.Right) decision.tryComplete(ReturnDecision.Delivered)
-            answer
+        }
+
+        private fun copy(key: DataKey): Either<KeyError, Delivery> = resourceScope {
+            var raw: ByteArray? = null
+            onRelease { _ -> raw?.fill(0) }
+            val bytes = key.material.copyOf()
+            raw = bytes
+            register { bytes.fill(0) }
+            raw = null
+            Either.Right(Delivery.Copy(DataKey(key.owner, key.purpose, key.version, bytes)))
+        }
+
+        private fun register(closeExact: () -> Unit) {
+            row = Prepared(Any(), decision, ReleaseIntent(closeExact))
+            ledger.registerPrepared(checkNotNull(row))
+        }
+
+        fun chooseAbort(): Boolean {
+            decision.tryComplete(ReturnDecision.Abort)
+            return row != null
+        }
+
+        fun abort() = ledger.abortPrepared(checkNotNull(row))
+
+        fun delivered() = decision.tryComplete(ReturnDecision.Delivered)
+
+        companion object {
+            fun direct(
+                ledger: KeyCacheLedger, receipt: Resource<Receipt>,
+                flights: SingleFlight<Any, KeyError, Unit>, load: () -> Either<KeyError, DataKey>,
+            ): Either<KeyError, Delivery> {
+                val call = DeliveryCall(ledger, receipt, load)
+                val answer = resourceScope {
+                    var ready = false
+                    onRelease { _ -> if (!ready && call.chooseAbort()) call.abort() }
+                    call.prepare(flights).also { ready = it is Either.Right }
+                }
+                if (answer is Either.Right) call.delivered()
+                return answer
+            }
+
+            fun run(
+                callers: KeyCallers, ledger: KeyCacheLedger, receipt: Resource<Receipt>,
+                load: () -> Either<KeyError, DataKey>,
+            ): Either<KeyError, Delivery> = callers.deliver(DeliveryCall(ledger, receipt, load))
         }
     }
 
@@ -556,17 +582,17 @@ internal class KeyCallers(private val flights: SingleFlight<Any, KeyError, Unit>
     private val active = surefoldLocal<Set<Any>> { emptySet() }
     private val state = Shared(CallerState())
 
-    // Lifecycle capture retains opaque Fail and interruption until all owned frames have unwound.
-    @Suppress("TooGenericExceptionCaught")
-    fun call(body: () -> Unit) {
-        checkNotInTransaction()
+    private inner class AcceptedCall {
         val ticket = Ticket()
         val invocation = Invocation()
-        try {
+
+        // Preserve an opaque Fail before restoration can mask it.
+        @Suppress("TooGenericExceptionCaught")
+        fun withinOwner(body: () -> Unit) {
             try {
                 active.locally(active.get() + identity) {
                     try {
-                        if (admit(ticket, invocation)) body()
+                        body()
                     } catch (failure: Throwable) {
                         invocation.record(failure)
                     }
@@ -574,10 +600,37 @@ internal class KeyCallers(private val flights: SingleFlight<Any, KeyError, Unit>
             } catch (restoration: Throwable) {
                 invocation.record(restoration)
             }
-            val failure = invocation.assembled()
-            if (failure != null) throw failure
+        }
+    }
+
+    fun call(body: () -> Unit) {
+        checkNotInTransaction()
+        val accepted = AcceptedCall()
+        try {
+            accepted.withinOwner { if (admit(accepted.ticket, accepted.invocation)) body() }
+            accepted.invocation.assembled()?.let { throw it }
         } finally {
-            ticket.finished.tryComplete(Unit)
+            accepted.ticket.finished.tryComplete(Unit)
+        }
+    }
+
+    fun deliver(call: KeyCacheLedger.DeliveryCall): Either<KeyError, KeyCacheLedger.Delivery> {
+        checkNotInTransaction()
+        val accepted = AcceptedCall()
+        var candidate: Either<KeyError, KeyCacheLedger.Delivery>? = null
+        try {
+            accepted.withinOwner {
+                if (admit(accepted.ticket, accepted.invocation)) candidate = call.prepare(flights)
+            }
+            if ((accepted.invocation.failures.isNotEmpty() || candidate is Either.Left) && call.chooseAbort()) {
+                accepted.withinOwner(call::abort)
+            }
+            accepted.invocation.assembled()?.let { throw it }
+            val answer = checkNotNull(candidate)
+            if (answer is Either.Right) call.delivered()
+            return answer
+        } finally {
+            accepted.ticket.finished.tryComplete(Unit)
         }
     }
 
