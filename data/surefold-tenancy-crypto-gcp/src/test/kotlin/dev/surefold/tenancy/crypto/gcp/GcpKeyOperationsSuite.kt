@@ -12,12 +12,15 @@ import dev.surefold.tenancy.crypto.KeyFailureCode
 import dev.surefold.tenancy.crypto.RootCreation
 import dev.surefold.tenancy.crypto.RootExpectation
 import dev.surefold.tenancy.crypto.RootKey
+import dev.surefold.tenancy.crypto.RootLocation
 import dev.surefold.tenancy.crypto.RootState
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.net.InetSocketAddress
 import java.net.URI
+import java.time.Instant
 import java.util.Base64
 import java.util.zip.CRC32C
 
@@ -131,11 +134,17 @@ object GcpKeyOperationsSuite : Suite() {
                     val response = when {
                         path.endsWith(":destroy") -> """{"destroyTime":"2030-01-01T00:00:00Z"}"""
 
+                        path.endsWith("/cryptoKeyVersions") -> """
+                            {"cryptoKeyVersions":[{"name":"${basePath.removePrefix("/v1/")}/mrk-proof/cryptoKeyVersions/1",
+                            "state":"ENABLED"}]}
+                        """.trimIndent()
+
                         else -> """
                             {
                               "name": "${basePath.removePrefix("/v1/")}/mrk-proof",
                               "primary": { "state": "ENABLED" },
-                              "labels": { "surefold:key-id": "mrk-proof" }
+                              "labels": { "owner": "t1" },
+                              "destroyScheduledDuration": "604800s"
                             }
                         """.trimIndent()
                     }.encodeToByteArray()
@@ -159,7 +168,7 @@ object GcpKeyOperationsSuite : Suite() {
                 ops.bindAlias(created.location.root, "alias/doorlist/prod/t1") shouldBe Either.Right(Unit)
                 ops.enableRotation(created.location.root) shouldBe Either.Right(Unit)
                 val progress = ops.scheduleDeletion(
-                    ExpectedKeySet(RootExpectation(created.location, tags), emptyList()),
+                    ExpectedKeySet(RootExpectation(created.location, mapOf("owner" to "t1")), emptyList()),
                     waitingDays = 7,
                 )
                 progress.failure shouldBe null
@@ -168,5 +177,148 @@ object GcpKeyOperationsSuite : Suite() {
                 server.stop(0)
             }
         }
+
+        test("createPrimary names the key from surefold:key-id, labels it with the other tags and sets its wait") {
+            StrictKms().use { kms ->
+                val created = kms.operations(destroyScheduledDays = 30).createPrimary(
+                    RootCreation(
+                        "europe-west2", "gcp-iam", "desc",
+                        mapOf(
+                            "surefold:key-id" to "tenant-1",
+                            "env" to "test",
+                        ),
+                    ),
+                )
+                (created as Either.Right).value.location.root shouldBe RootKey("$RING_NAME/cryptoKeys/tenant-1")
+                val sent = kms.created.peek().single()
+                sent["labels"]!!.jsonObject.mapValues { it.value.jsonPrimitive.content } shouldBe mapOf("env" to "test")
+                sent["destroyScheduledDuration"]!!.jsonPrimitive.content shouldBe "2592000s"
+            }
+        }
+
+        test("createPrimary without a wait leaves Google's default, and a label Google refuses is InvalidInput") {
+            StrictKms().use { kms ->
+                val ops = kms.operations()
+                ops.createPrimary(RootCreation("europe-west2", "gcp-iam", "desc", mapOf("surefold:key-id" to "k1")))
+                kms.created.peek().single().containsKey("destroyScheduledDuration") shouldBe false
+                val refused = ops.createPrimary(RootCreation("europe-west2", "gcp-iam", "desc", mapOf("a:b" to "c")))
+                (refused as Either.Left).value.code shouldBe KeyFailureCode.InvalidInput
+            }
+        }
+
+        test("scheduleDeletion destroys every live version across pages and keeps a date already accepted") {
+            StrictKms(
+                versions = listOf("ENABLED", "DESTROY_SCHEDULED", "DESTROYED", "DISABLED"),
+                labels = mapOf("owner" to "t1"),
+            ).use { kms ->
+                val location = kms.location()
+                val progress = kms.operations().scheduleDeletion(
+                    ExpectedKeySet(RootExpectation(location, mapOf("owner" to "t1")), emptyList()),
+                    waitingDays = 30,
+                )
+                progress.failure shouldBe null
+                kms.destroyed.peek() shouldBe listOf("1", "4")
+                progress.regions.single().effectiveAt shouldBe Instant.parse("2030-02-01T00:00:00Z")
+            }
+        }
+
+        test("scheduleDeletion refuses a wait the key was not made with, or tags it does not carry, before any call") {
+            StrictKms(versions = listOf("ENABLED"), labels = mapOf("owner" to "t1")).use { kms ->
+                val ops = kms.operations()
+                val owned = ExpectedKeySet(RootExpectation(kms.location(), mapOf("owner" to "t1")), emptyList())
+                ops.scheduleDeletion(owned, waitingDays = 7).failure?.code shouldBe KeyFailureCode.Conflict
+                val anothers = ExpectedKeySet(RootExpectation(kms.location(), mapOf("owner" to "t2")), emptyList())
+                ops.scheduleDeletion(anothers, waitingDays = 30).failure?.code shouldBe KeyFailureCode.Conflict
+                kms.destroyed.peek() shouldBe emptyList()
+            }
+        }
+
+        test("scheduleDeletion answers no date when a version's is unreadable, and a failed destroy as its failure") {
+            StrictKms(versions = listOf("ENABLED"), labels = emptyMap(), destroyTime = "soon").use { kms ->
+                val expected = ExpectedKeySet(RootExpectation(kms.location(), emptyMap()), emptyList())
+                kms.operations().scheduleDeletion(expected, waitingDays = 30).regions.single().effectiveAt shouldBe null
+            }
+            StrictKms(versions = listOf("ENABLED"), labels = emptyMap(), destroyStatus = 403).use { kms ->
+                val expected = ExpectedKeySet(RootExpectation(kms.location(), emptyMap()), emptyList())
+                val progress = kms.operations().scheduleDeletion(expected, waitingDays = 30)
+                progress.failure?.code shouldBe KeyFailureCode.Refused
+                progress.regions shouldBe emptyList()
+            }
+        }
     }
+}
+
+private const val RING_NAME = "projects/p1/locations/europe-west2/keyRings/r1"
+
+/** Cloud KMS as Google documents it where the module's claims depend on it: label names, versions by page, the wait. */
+private class StrictKms(
+    versions: List<String> = emptyList(),
+    private val labels: Map<String, String> = emptyMap(),
+    private val destroyTime: String = "2030-02-01T00:00:00Z",
+    private val destroyStatus: Int = 200,
+) : AutoCloseable {
+    val created = Shared(emptyList<JsonObject>())
+    val destroyed = Shared(emptyList<String>())
+    private val key = "$RING_NAME/cryptoKeys/k1"
+    private val versions = versions.mapIndexed { index, state -> (index + 1).toString() to state }
+    private val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply {
+        createContext("/v1/") { exchange ->
+            val (status, body) = answer(
+                exchange.requestMethod,
+                exchange.requestURI.path.removePrefix("/v1/"),
+                exchange.requestURI.query.orEmpty(),
+                exchange.requestBody.readAllBytes().decodeToString(),
+            )
+            val bytes = body.encodeToByteArray()
+            exchange.sendResponseHeaders(status, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        start()
+    }
+
+    fun operations(destroyScheduledDays: Int? = null) = GcpKeyOperations(
+        projectId = "p1",
+        keyRing = "r1",
+        endpoint = URI.create("http://127.0.0.1:${server.address.port}"),
+        tokens = { "test-token".right() },
+        destroyScheduledDays = destroyScheduledDays,
+    )
+
+    fun location() = RootLocation(RootKey(key), "p1", "gcp", "europe-west2")
+
+    private fun answer(method: String, path: String, query: String, body: String): Pair<Int, String> = when {
+        method == "POST" && path == "$RING_NAME/cryptoKeys" -> create(query, Json.parseToJsonElement(body).jsonObject)
+
+        method == "POST" && path.endsWith(":destroy") -> {
+            val _ = destroyed.update { it + path.substringAfterLast('/').removeSuffix(":destroy") }
+            destroyStatus to """{"destroyTime":"$destroyTime"}"""
+        }
+
+        path == "$key/cryptoKeyVersions" -> 200 to page(first = query.isEmpty())
+
+        path == key -> {
+            val pairs = labels.entries.joinToString(",") { (name, value) -> """"$name":"$value"""" }
+            200 to """{"name":"$key","labels":{$pairs},"destroyScheduledDuration":"2592000s"}"""
+        }
+
+        else -> 404 to "{}"
+    }
+
+    private fun create(query: String, sent: JsonObject): Pair<Int, String> {
+        val names = sent["labels"]!!.jsonObject.keys
+        if (!names.all { Regex("[a-z][a-z0-9_-]{0,62}").matches(it) }) return 400 to "{}"
+        val _ = created.update { it + sent }
+        return 200 to """{"name":"$RING_NAME/cryptoKeys/${query.removePrefix("cryptoKeyId=")}"}"""
+    }
+
+    private fun page(first: Boolean): String {
+        val items = (if (first) versions.take(2) else versions.drop(2)).joinToString(",") { (number, state) ->
+            val scheduled = if (state == "DESTROY_SCHEDULED") ""","destroyTime":"2030-01-15T00:00:00Z"""" else ""
+            """{"name":"$key/cryptoKeyVersions/$number","state":"$state"$scheduled}"""
+        }
+        val next = if (first && versions.size > 2) ""","nextPageToken":"more"""" else ""
+        return """{"cryptoKeyVersions":[$items]$next}"""
+    }
+
+    override fun close() = server.stop(0)
 }

@@ -114,6 +114,8 @@ class GcpKeyOperations(
         .connectTimeout(JavaDuration.ofSeconds(CONNECT_TIMEOUT_SECONDS)).build(),
     private val endpoint: URI = DEFAULT_ENDPOINT,
     private val tokens: GcpKmsTokenSource = GcpKmsTokenSource.metadata(http),
+    /** Google fixes a key's wait before destruction when the key is made; null leaves Google's default. */
+    private val destroyScheduledDays: Int? = null,
 ) : KeyOperations {
 
     private val random = SecureRandom()
@@ -296,14 +298,14 @@ class GcpKeyOperations(
         }
         val allExpected = expected.replicas + expected.primary
         for (item in allExpected) {
-            when (val verified = verifyBeforeDeletion(item, op)) {
+            when (val verified = verifyBeforeDeletion(item, waitingDays, op)) {
                 is Either.Left -> return DeletionProgress(emptyList(), verified.value)
                 is Either.Right -> Unit
             }
         }
         val accepted = mutableListOf<RegionalDeletion>()
         for (item in allExpected) {
-            when (val destroyed = destroyPrimaryVersion(item.location, op)) {
+            when (val destroyed = destroyVersions(item.location, op)) {
                 is Either.Left -> return DeletionProgress(accepted, destroyed.value)
                 is Either.Right -> accepted += destroyed.value
             }
@@ -311,34 +313,56 @@ class GcpKeyOperations(
         return DeletionProgress(accepted, null)
     }
 
+    /** Google takes no wait on a destroy call, so the key's own must already be the one asked for. */
     private fun verifyBeforeDeletion(
         expectation: RootExpectation,
+        waitingDays: Int,
         op: KeyOperation,
     ): Either<KeyOperationFailure, Unit> = attempt {
-        val meta = describe(expectation.location.root).mapLeft { KeyOperationFailure(op, it.code) }.bind()
-        ensure(meta.location == expectation.location) { KeyOperationFailure(op, KeyFailureCode.Conflict) }
-        val observedTags = tags(expectation.location.root).mapLeft { KeyOperationFailure(op, it.code) }.bind()
-        val tagsMatch = expectation.requiredTags.all { (k, v) -> observedTags.entries[k] == v }
-        ensure(tagsMatch) { KeyOperationFailure(op, KeyFailureCode.Conflict) }
+        val parsed = parseResourceName(expectation.location.root.id, op).bind()
+        ensure(parsed.toLocation() == expectation.location) { KeyOperationFailure(op, KeyFailureCode.Conflict) }
+        val token = tokens.accessToken(op).bind()
+        val body = getJson("/v1/${parsed.resourceName}", token, op).bind()
+        val labels = body["labels"]?.jsonObject
+        val tagsMatch = expectation.requiredTags.all { (k, v) -> labels?.get(k)?.jsonPrimitive?.content == v }
+        val wait = body["destroyScheduledDuration"]?.jsonPrimitive?.content
+        ensure(tagsMatch && wait == "${waitingDays * SECONDS_PER_DAY}s") {
+            KeyOperationFailure(op, KeyFailureCode.Conflict)
+        }
     }
 
-    private fun destroyPrimaryVersion(
+    /** A data key is opened by the version that wrapped it, so shredding a key is destroying every version. */
+    private fun destroyVersions(
         location: RootLocation,
         op: KeyOperation,
     ): Either<KeyOperationFailure, RegionalDeletion> = attempt {
         val parsed = parseResourceName(location.root.id, op).bind()
         val token = tokens.accessToken(op).bind()
-        val body = postJson(
-            "/v1/${parsed.resourceName}/cryptoKeyVersions/1:destroy",
-            "{}",
-            token,
-            op,
-        ).bind()
-        val destroyTime = body["destroyTime"]?.jsonPrimitive?.content?.let {
-            Either.catch { Instant.parse(it) }.getOrNull()
-        }
-        RegionalDeletion(location, DeletionState.PendingDeletion, destroyTime)
+        val times = mutableListOf<Instant?>()
+        var pageToken: String? = null
+        do {
+            val query = pageToken?.let { "?pageToken=" + URLEncoder.encode(it, StandardCharsets.UTF_8) }.orEmpty()
+            val page = getJson("/v1/${parsed.resourceName}/cryptoKeyVersions$query", token, op).bind()
+            for (item in page["cryptoKeyVersions"]?.jsonArray.orEmpty()) {
+                val version = item.jsonObject
+                val name = version["name"]?.jsonPrimitive?.content
+                ensure(name != null && name.startsWith("${parsed.resourceName}/cryptoKeyVersions/")) {
+                    KeyOperationFailure(op, KeyFailureCode.IncompleteEvidence)
+                }
+                when (version["state"]?.jsonPrimitive?.content) {
+                    "DESTROYED" -> Unit
+                    "DESTROY_SCHEDULED" -> times += destroyTime(version)
+                    else -> times += destroyTime(postJson("/v1/$name:destroy", "{}", token, op).bind())
+                }
+            }
+            pageToken = page["nextPageToken"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
+        } while (pageToken != null)
+        val last = if (times.any { it == null }) null else times.filterNotNull().maxOrNull()
+        RegionalDeletion(location, DeletionState.PendingDeletion, last)
     }
+
+    private fun destroyTime(version: JsonObject): Instant? =
+        version["destroyTime"]?.jsonPrimitive?.content?.let { Either.catch { Instant.parse(it) }.getOrNull() }
 
     private fun createKeyInRegion(
         request: RootCreation,
@@ -349,13 +373,15 @@ class GcpKeyOperations(
             KeyOperationFailure(op, KeyFailureCode.InvalidInput)
         }
         val token = tokens.accessToken(op).bind()
-        val keyId = request.tags["surefold:key-id"] ?: "mrk-${UUID.randomUUID().toString().replace("-", "")}"
+        val keyId = request.tags[KEY_ID_TAG] ?: "mrk-${UUID.randomUUID().toString().replace("-", "")}"
+        // Google refuses a colon in a label name, and the id is already the key's name.
         val labelsObj = buildJsonObject {
-            request.tags.forEach { (k, v) -> put(k, JsonPrimitive(v)) }
+            request.tags.filterKeys { it != KEY_ID_TAG }.forEach { (k, v) -> put(k, JsonPrimitive(v)) }
         }
         val payload = buildJsonObject {
             put("purpose", JsonPrimitive("ENCRYPT_DECRYPT"))
             put("labels", labelsObj)
+            destroyScheduledDays?.let { put("destroyScheduledDuration", JsonPrimitive("${it * SECONDS_PER_DAY}s")) }
         }.toString()
         val query = "cryptoKeyId=" + URLEncoder.encode(keyId, StandardCharsets.UTF_8)
         val path = "/v1/projects/$projectId/locations/${request.region}/keyRings/$keyRing/cryptoKeys?$query"
@@ -572,6 +598,10 @@ class GcpKeyOperations(
         private const val KEY_BYTES = 32
         private const val MIN_WAITING_DAYS = 7
         private const val MAX_WAITING_DAYS = 30
+        private const val SECONDS_PER_DAY = 86_400
+
+        /** The tag that names the key to make; it is never sent as a label. */
+        const val KEY_ID_TAG = "surefold:key-id"
         private val MUTATION_OPS = setOf(
             KeyOperation.CreatePrimary,
             KeyOperation.BindAlias,
@@ -624,7 +654,7 @@ class GcpKms(
             region = region,
             policy = "gcp-iam",
             description = "surefold-tenancy-crypto root key for ${ownerSuffix(owner)}",
-            tags = mapOf("surefold:key-id" to keyId, "surefold_owner" to ownerSuffix(owner)),
+            tags = mapOf(GcpKeyOperations.KEY_ID_TAG to keyId, "surefold_owner" to ownerSuffix(owner)),
         )
         return operations.createPrimary(creation)
             .map { meta ->
