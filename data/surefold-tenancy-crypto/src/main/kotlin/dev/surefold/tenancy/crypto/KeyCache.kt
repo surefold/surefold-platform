@@ -12,6 +12,7 @@ import dev.surefold.fail.Either
 import dev.surefold.fail.flatMap
 import dev.surefold.fail.map
 import dev.surefold.fail.right
+import dev.surefold.onThrow
 import dev.surefold.resource
 import dev.surefold.resourceScope
 import dev.surefold.surefoldLocal
@@ -586,20 +587,32 @@ internal class KeyCallers(private val flights: SingleFlight<Any, KeyError, Unit>
         val ticket = Ticket()
         val invocation = Invocation()
 
-        // Preserve an opaque Fail before restoration can mask it.
-        @Suppress("TooGenericExceptionCaught")
-        fun withinOwner(body: () -> Unit) {
+        fun <A> run(body: () -> A): A = withinOwner {
+            if (!admit(ticket, invocation)) throw checkNotNull(invocation.assembled())
+            body()
+        }
+
+        fun abort(call: KeyCacheLedger.DeliveryCall) {
+            if (call.chooseAbort()) withinOwner(call::abort)
+        }
+
+        // The failed cleanup must carry the caller's original failure, with distinct diagnostics.
+        @Suppress("ThrowingExceptionFromFinally")
+        fun abortAfterFailure(call: KeyCacheLedger.DeliveryCall, primary: Throwable) {
+            var abortFailed = false
             try {
-                active.locally(active.get() + identity) {
-                    try {
-                        body()
-                    } catch (failure: Throwable) {
-                        invocation.record(failure)
-                    }
-                }
-            } catch (restoration: Throwable) {
-                invocation.record(restoration)
+                onThrow({ cleanup ->
+                    abortFailed = true
+                    invocation.record(cleanup)
+                }) { abort(call) }
+            } finally {
+                if (abortFailed) throw checkNotNull(invocation.assembled(primary))
             }
+        }
+
+        private fun <A> withinOwner(body: () -> A): A = resourceScope {
+            install({ active.attach(active.get() + identity) }) { binding, _ -> binding.detach() }
+            body()
         }
     }
 
@@ -607,8 +620,7 @@ internal class KeyCallers(private val flights: SingleFlight<Any, KeyError, Unit>
         checkNotInTransaction()
         val accepted = AcceptedCall()
         try {
-            accepted.withinOwner { if (admit(accepted.ticket, accepted.invocation)) body() }
-            accepted.invocation.assembled()?.let { throw it }
+            accepted.run(body)
         } finally {
             accepted.ticket.finished.tryComplete(Unit)
         }
@@ -617,17 +629,14 @@ internal class KeyCallers(private val flights: SingleFlight<Any, KeyError, Unit>
     fun deliver(call: KeyCacheLedger.DeliveryCall): Either<KeyError, KeyCacheLedger.Delivery> {
         checkNotInTransaction()
         val accepted = AcceptedCall()
-        var candidate: Either<KeyError, KeyCacheLedger.Delivery>? = null
         try {
-            accepted.withinOwner {
-                if (admit(accepted.ticket, accepted.invocation)) candidate = call.prepare(flights)
+            val answer = onThrow({ primary -> accepted.abortAfterFailure(call, primary) }) {
+                accepted.run { call.prepare(flights) }
             }
-            if ((accepted.invocation.failures.isNotEmpty() || candidate is Either.Left) && call.chooseAbort()) {
-                accepted.withinOwner(call::abort)
+            when (answer) {
+                is Either.Left -> accepted.abort(call)
+                is Either.Right -> call.delivered()
             }
-            accepted.invocation.assembled()?.let { throw it }
-            val answer = checkNotNull(candidate)
-            if (answer is Either.Right) call.delivered()
             return answer
         } finally {
             accepted.ticket.finished.tryComplete(Unit)

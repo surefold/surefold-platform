@@ -673,6 +673,41 @@ internal object RetainedKeyDeliverySuite : Suite(concurrent = false, isolated = 
                 callers.closeAndAwait()
             }
         }
+        test("caller abort keeps a cleanup failure already reachable from the primary") {
+            val source = byteArrayOf(3, 4, 5)
+            val original = IllegalStateException("caller receipt release")
+            val prior = IllegalArgumentException("prior cleanup")
+            val cleanup = IllegalArgumentException("caller view cleanup")
+            prior.addSuppressed(cleanup)
+            original.addSuppressed(prior)
+            withLoadGroups(listOf(source)) { ledger, flights, legacy, captured ->
+                val callers = KeyCallers(flights)
+                val held = resource {
+                    onRelease { _ -> throw original }
+                    ledger.enrol(deliveryKey(legacy, true), captured, groupDeadline).bind()
+                }
+                shouldThrow<IllegalStateException>({
+                    atDeliveryCommit({ stack ->
+                        stack.any { it.methodName == "abortPrepared" } &&
+                            stack.any { it.className.endsWith("OwnedKeyMaterial") }
+                    }, { throw cleanup }) {
+                        KeyCacheLedger.DeliveryCall.run(callers, ledger, held) {
+                            Either.Right(DataKey(KeyOwner.Platform, KeyPurpose.Enc, 1, source))
+                        }
+                    }
+                }) {
+                    (it === original) shouldBe true
+                    (it.suppressed.singleOrNull() === prior) shouldBe true
+                    (prior.suppressed.singleOrNull() === cleanup) shouldBe true
+                }
+                val state = privateField(ledger, "state") as Shared<*>
+                (privateField(state.peek(), "pending") as List<*>).size shouldBe 1
+                ledger.drain()
+                (privateField(state.peek(), "pending") as List<*>).isEmpty() shouldBe true
+                callers.closeAndAwait()
+            }
+        }
+
         test("a clean qualified refusal surfaces its exact abort failure") {
             val source = byteArrayOf(3, 4, 5)
             val cleanup = IllegalStateException("refused view cleanup")
@@ -750,6 +785,20 @@ internal object RetainedKeyDeliverySuite : Suite(concurrent = false, isolated = 
 
 object RetainedKeyCallersSuite : Suite(concurrent = false, isolated = true) {
     init {
+        test("a failed nested caller restores its outer owner binding") {
+            val callers = KeyCallers(SingleFlight())
+            val original = IllegalStateException("nested caller failure")
+            callers.call {
+                shouldThrow<IllegalStateException>({
+                    callers.call { throw original }
+                }) { (it === original) shouldBe true }
+                shouldThrow<IllegalStateException>({ callers.closeAndAwait() }) {
+                    it.message shouldBe "a key cache caller cannot close its owner"
+                }
+            }
+            callers.closeAndAwait()
+        }
+
         test("an accepted body owns its Resource release before call returns") {
             val callers = KeyCallers(SingleFlight())
             val events = Shared(emptyList<String>())
