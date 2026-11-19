@@ -159,6 +159,7 @@ internal class KeyRetention private constructor(
         val owner = owners[slot.owner]
         if (owner == null || owner.epoch !== admission.epoch) return Publication(this, false, null)
         val prior = owner.slots[slot]
+        if (prior != null && admission.ticket <= prior.watermark) return Publication(this, false, null)
         val record = Record(slot, admission.identity, admission.epoch, admission.ticket, sourceId, loadedAt)
         return Publication(
             update(slot, owner, Retained(admission.ticket, record)),

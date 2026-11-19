@@ -28,6 +28,7 @@ import dev.surefold.resource
 import dev.surefold.resourceScope
 import dev.surefold.scope
 import dev.surefold.takingTurns
+import dev.surefold.tenancy.TenantId
 import dev.surefold.test.eventually
 import dev.surefold.timeout
 import dev.surefold.transact
@@ -37,7 +38,7 @@ import java.util.concurrent.CancellationException
 import java.util.concurrent.locks.LockSupport
 import kotlin.time.Duration.Companion.seconds
 
-object RetainedKeyCacheSuite : Suite() {
+object KeyRetentionSuite : Suite() {
     init {
         test("a slower successful load cannot replace a newer success or restore it after removal") {
             val slot = KeyCache.Slot(KeyOwner.Platform, KeyPurpose.Enc, 1)
@@ -59,6 +60,118 @@ object RetainedKeyCacheSuite : Suite() {
             stale.policy.admit(slot, Any()).admission.captured shouldBe null
         }
 
+        test("a newer admission without a success does not prevent an older success") {
+            val slot = KeyCache.Slot(KeyOwner.Platform, KeyPurpose.Enc, 1)
+            val first = KeyRetention(1).admit(slot, Any())
+            val failed = first.policy.admit(slot, Any())
+            val source = Any()
+            val loadedAt = Instant.EPOCH.plusSeconds(5)
+
+            val published = failed.policy.publish(first.admission, source, loadedAt)
+
+            published.accepted shouldBe true
+            val fresh = published.policy.admit(slot, Any())
+            val again = fresh.policy.admit(slot, Any())
+            val held = checkNotNull(again.admission.captured)
+            (held.sourceId === source) shouldBe true
+            held.ticket shouldBe first.admission.ticket
+            held.loadedAt shouldBe loadedAt
+        }
+
+        test("forget fences a late publication after the same owner returns") {
+            val slot = KeyCache.Slot(KeyOwner.Platform, KeyPurpose.Enc, null)
+            val first = KeyRetention(1).admit(slot, Any())
+            val published = first.policy.publish(first.admission, Any(), Instant.EPOCH)
+            val pending = published.policy.admit(slot, Any())
+            val held = checkNotNull(pending.admission.captured)
+            val forgotten = pending.policy.forget(slot.owner)
+            val newEpoch = Any()
+            val returned = forgotten.policy.admit(slot, newEpoch)
+
+            forgotten.displaced shouldBe listOf(held)
+            (returned.admission.epoch === newEpoch) shouldBe true
+            (returned.admission.epoch === pending.admission.epoch) shouldBe false
+            returned.admission.captured shouldBe null
+            val late = returned.policy.publish(pending.admission, Any(), Instant.EPOCH)
+            late.accepted shouldBe false
+            (late.policy === returned.policy) shouldBe true
+        }
+
+        test("legacy and qualified admissions share owner recency and capacity") {
+            val active = KeyCache.Slot(KeyOwner.Platform, KeyPurpose.Enc, null)
+            val tenant = KeyOwner.Tenant(TenantId("synthetic-retention"))
+            val qualified = KeyIdentity(tenant, KeyPurpose.Enc, 1, byteArrayOf(3))
+            val first = KeyRetention(2).admit(active, Any())
+            val legacy = first.policy.publish(first.admission, Any(), Instant.EPOCH)
+            val second = legacy.policy.admit(qualified, Any())
+            val qualifiedSource = Any()
+            val current = second.policy.publish(second.admission, qualifiedSource, Instant.EPOCH)
+            val touch = current.policy.admit(KeyIdentity(active.owner, active.purpose, 1, byteArrayOf(4)), Any())
+            val third = KeyCache.Slot(KeyOwner.Tenant(TenantId("synthetic-other")), KeyPurpose.Enc, null)
+
+            val overflow = touch.policy.admit(third, Any())
+
+            overflow.displaced.size shouldBe 1
+            (overflow.displaced.single().sourceId === qualifiedSource) shouldBe true
+            (touch.admission.epoch === first.admission.epoch) shouldBe true
+            touch.admission.captured shouldBe null
+            overflow.policy.contains(overflow.displaced.single()) shouldBe false
+            val hit = overflow.policy.admit(active, Any())
+            (hit.admission.epoch === first.admission.epoch) shouldBe true
+            (hit.admission.captured != null) shouldBe true
+            overflow.policy.publish(second.admission, Any(), Instant.EPOCH).accepted shouldBe false
+        }
+
+        test("revisions and modes compete in one versioned slot without replacing the active alias") {
+            val owner = KeyOwner.Platform
+            val alias = KeyCache.Slot(owner, KeyPurpose.Enc, null)
+            val legacy = alias.copy(version = 1)
+            val firstIdentity = KeyIdentity(owner, KeyPurpose.Enc, 1, byteArrayOf(1))
+            val sameIdentity = KeyIdentity(owner, KeyPurpose.Enc, 1, byteArrayOf(1))
+            val revised = KeyIdentity(owner, KeyPurpose.Enc, 1, byteArrayOf(2))
+            val first = KeyRetention(1).admit(alias, Any())
+            val activeSource = Any()
+            val active = first.policy.publish(first.admission, activeSource, Instant.EPOCH)
+            val admission = active.policy.admit(firstIdentity, Any())
+            val initial = admission.policy.publish(admission.admission, Any(), Instant.EPOCH)
+            val equal = initial.policy.admit(sameIdentity, Any())
+            val distinct = equal.policy.admit(revised, Any())
+
+            val old = checkNotNull(equal.admission.captured)
+            distinct.admission.captured shouldBe null
+            distinct.policy.admit(legacy, Any()).admission.captured shouldBe null
+            val replacement = distinct.policy.publish(distinct.admission, Any(), Instant.EPOCH.plusSeconds(1))
+            replacement.displaced shouldBe old
+            val retained = checkNotNull(replacement.policy.admit(revised, Any()).admission.captured)
+            val unqualified = replacement.policy.admit(legacy, Any())
+            val copied = unqualified.policy.publish(unqualified.admission, Any(), Instant.EPOCH)
+            copied.displaced shouldBe retained
+            copied.policy.admit(revised, Any()).admission.captured shouldBe null
+            (copied.policy.admit(alias, Any()).admission.captured?.sourceId === activeSource) shouldBe true
+        }
+
+        test("dropping a captured record cannot remove its same-identity replacement") {
+            val identity = KeyIdentity(KeyOwner.Platform, KeyPurpose.Enc, 1, byteArrayOf(1))
+            val admitted = KeyRetention(1).admit(identity, Any())
+            val first = admitted.policy.publish(admitted.admission, Any(), Instant.EPOCH)
+            val refresh = first.policy.admit(identity, Any())
+            val old = checkNotNull(refresh.admission.captured)
+            val source = Any()
+            val updated = refresh.policy.publish(refresh.admission, source, Instant.EPOCH.plusSeconds(1))
+            val current = checkNotNull(updated.policy.admit(identity, Any()).admission.captured)
+
+            val removal = updated.policy.drop(old)
+
+            (current.sourceId === source) shouldBe true
+            removal.displaced shouldBe emptyList()
+            removal.policy.contains(old) shouldBe false
+            removal.policy.contains(current) shouldBe true
+        }
+    }
+}
+
+object RetainedKeyCacheSuite : Suite() {
+    init {
         test("an owed release waits for an explicit drain") {
             val ledger = KeyCacheLedger()
             val calls = Shared(0)
