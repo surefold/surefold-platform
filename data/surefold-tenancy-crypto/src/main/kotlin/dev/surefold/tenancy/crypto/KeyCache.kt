@@ -101,6 +101,94 @@ class KeyCache(
     private operator fun Instant.plus(duration: Duration): Instant = plus(duration.toJavaDuration())
 }
 
+/** Immutable retention decisions. The ledger owns the sources behind these opaque IDs. */
+internal class KeyRetention private constructor(
+    private val capacity: Int,
+    private val ticket: Long,
+    private val owners: Map<KeyOwner, Owner>,
+) {
+    constructor(capacity: Int) : this(capacity, 0L, emptyMap()) {
+        require(capacity > 0)
+    }
+
+    class Admission(
+        val slot: KeyCache.Slot,
+        val identity: KeyIdentity?,
+        val epoch: Any,
+        val ticket: Long,
+        val captured: Record?,
+    )
+
+    class Record(
+        val slot: KeyCache.Slot,
+        val identity: KeyIdentity?,
+        val epoch: Any,
+        val ticket: Long,
+        val sourceId: Any,
+        val loadedAt: Instant,
+    )
+
+    data class Admitted(val policy: KeyRetention, val admission: Admission, val displaced: List<Record>)
+    data class Publication(val policy: KeyRetention, val accepted: Boolean, val displaced: Record?)
+    data class Removal(val policy: KeyRetention, val displaced: List<Record>)
+
+    private data class Owner(val epoch: Any, val slots: Map<KeyCache.Slot, Retained> = emptyMap())
+    private data class Retained(val watermark: Long, val record: Record?)
+
+    fun admit(slot: KeyCache.Slot, freshEpoch: Any): Admitted = admit(slot, null, freshEpoch)
+
+    fun admit(identity: KeyIdentity, freshEpoch: Any): Admitted =
+        admit(KeyCache.Slot(identity.owner, identity.purpose, identity.version), identity, freshEpoch)
+
+    private fun admit(slot: KeyCache.Slot, identity: KeyIdentity?, freshEpoch: Any): Admitted {
+        val owner = owners[slot.owner] ?: Owner(freshEpoch)
+        val touched = owners - slot.owner + (slot.owner to owner)
+        val evicted = if (touched.size > capacity) touched.entries.first() else null
+        val remaining = if (evicted == null) touched else touched - evicted.key
+        val nextTicket = Math.incrementExact(ticket)
+        val captured = owner.slots[slot]?.record?.takeIf { it.identity == identity }
+        return Admitted(
+            KeyRetention(capacity, nextTicket, remaining),
+            Admission(slot, identity, owner.epoch, nextTicket, captured),
+            evicted?.value?.slots?.values.orEmpty().mapNotNull { it.record },
+        )
+    }
+
+    fun publish(admission: Admission, sourceId: Any, loadedAt: Instant): Publication {
+        val slot = admission.slot
+        val owner = owners[slot.owner]
+        if (owner == null || owner.epoch !== admission.epoch) return Publication(this, false, null)
+        val prior = owner.slots[slot]
+        if (prior != null && admission.ticket <= prior.watermark) return Publication(this, false, null)
+        val record = Record(slot, admission.identity, admission.epoch, admission.ticket, sourceId, loadedAt)
+        return Publication(
+            update(slot, owner, Retained(admission.ticket, record)),
+            true,
+            prior?.record,
+        )
+    }
+
+    fun contains(record: Record): Boolean =
+        owners[record.slot.owner]?.slots?.get(record.slot)?.record === record
+
+    fun drop(record: Record): Removal {
+        if (!contains(record)) return Removal(this, emptyList())
+        val owner = owners.getValue(record.slot.owner)
+        val slot = owner.slots.getValue(record.slot)
+        return Removal(update(record.slot, owner, slot.copy(record = null)), listOf(record))
+    }
+
+    fun forget(owner: KeyOwner): Removal {
+        val held = owners[owner] ?: return Removal(this, emptyList())
+        return Removal(KeyRetention(capacity, ticket, owners - owner), held.slots.values.mapNotNull { it.record })
+    }
+
+    private fun update(slot: KeyCache.Slot, owner: Owner, retained: Retained): KeyRetention {
+        val changed = owner.copy(slots = owner.slots + (slot to retained))
+        return KeyRetention(capacity, ticket, owners + (slot.owner to changed))
+    }
+}
+
 /** Pending releases belonging to this cache's ownership protocol. */
 internal class KeyCacheLedger {
     private class ReleaseIntent(val action: () -> Unit)
