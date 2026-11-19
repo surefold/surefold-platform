@@ -43,8 +43,8 @@ class KeyCache(
     /** One key: an owner's [purpose] at [version], or its active one when [version] is null. */
     internal data class Slot(val owner: KeyOwner, val purpose: KeyPurpose, val version: Int?)
 
-    private val ledger = KeyCacheLedger(tenants, soft, hard)
     private val callers = KeyCallers(SingleFlight("surefold.tenancy.crypto.keys"))
+    private val ledger = KeyCacheLedger(tenants, soft, hard, callers)
 
     /** The key in [slot], unwrapped by [load] when it is missing or [soft] old. */
     internal fun get(slot: Slot, load: () -> Either<KeyError, DataKey>): Either<KeyError, DataKey> =
@@ -57,11 +57,15 @@ class KeyCache(
 
     fun revokeAll() = ledger.revoke(null)
 
+    fun closeAndJoin() = callers.closePublic(ledger)
+
     /** Drops every retained key of [owner]'s. Existing copies remain independently owned. */
     fun evict(owner: KeyOwner) = ledger.evict(owner)
 }
 
 private operator fun Instant.plus(duration: Duration): Instant = plus(duration.toJavaDuration())
+
+private fun closedKeyCache(): Nothing = error("the key cache is closed")
 
 private val viewDenied = KeyError.Denied("the key view is unavailable")
 private val viewExpired = KeyError.Unavailable("the key view has expired")
@@ -167,10 +171,11 @@ internal class KeyCacheLedger(
     capacity: Int = 1_000,
     private val soft: Duration = 15.minutes,
     private val hard: Duration = 60.minutes,
+    private val callers: KeyCallers? = null,
 ) {
     private class ReleaseIntent(val action: () -> Unit)
     data class LoadKey(val slot: KeyCache.Slot, val identity: KeyIdentity?, val epoch: Any)
-    class Receipt(val group: Any, val id: Any, val clock: Clock)
+    class Receipt(val group: Any, val id: Any, val clock: Clock, val closed: Boolean = false)
     sealed interface Delivery {
         class Copy(val key: DataKey) : Delivery
         class View(val view: KeyView) : Delivery
@@ -200,6 +205,7 @@ internal class KeyCacheLedger(
     }
     private data class State(
         val retention: KeyRetention,
+        val closed: Boolean = false,
         val pending: List<ReleaseIntent> = emptyList(),
         val prepared: List<Prepared> = emptyList(),
         val open: Map<LoadKey, Any> = emptyMap(),
@@ -223,12 +229,14 @@ internal class KeyCacheLedger(
         private val ledger: KeyCacheLedger,
         private val receipt: Resource<Receipt>,
         private val load: () -> Either<KeyError, DataKey>,
+        val refuse: () -> Either<KeyError, A> = ::closedKeyCache,
         private val project: (Delivery) -> A,
     ) {
         private val decision = HandoffDecision<ReturnDecision>()
         private var row: Prepared? = null
 
         fun prepare(flights: SingleFlight<Any, KeyError, Unit>): Either<KeyError, A> = receipt.use { admitted ->
+            if (admitted.closed) return@use refuse()
             ledger.awaitSource(admitted, flights, load).flatMap { ref ->
                 when (val held = ref.source) {
                     is Legacy -> copy(held.key)
@@ -304,7 +312,9 @@ internal class KeyCacheLedger(
                 callers: KeyCallers, ledger: KeyCacheLedger, receipt: Resource<Receipt>,
                 load: () -> Either<KeyError, DataKey>,
             ): Either<KeyError, KeyView> =
-                callers.deliver(DeliveryCall(ledger, receipt, load) { (it as Delivery.View).view })
+                callers.deliver(
+                    DeliveryCall(ledger, receipt, load, { Either.Left(viewDenied) }) { (it as Delivery.View).view },
+                )
         }
     }
 
@@ -333,7 +343,12 @@ internal class KeyCacheLedger(
 
     private fun guarded(ref: SourceRef, held: Qualified, view: KeyView): KeyView = object : KeyView by view {
         override fun <A> using(block: (ByteArray) -> A): Either<KeyError, A> {
+            if (callers != null) return callers.using { useHeld(block) }
             checkNotInTransaction()
+            return useHeld(block)
+        }
+
+        private fun <A> useHeld(block: (ByteArray) -> A): Either<KeyError, A> {
             if (held.revoked.peek()) return Either.Left(viewDenied)
             val delegated = view.using { bytes ->
                 if (held.revoked.peek()) return@using Either.Left(viewDenied)
@@ -450,25 +465,39 @@ internal class KeyCacheLedger(
     private fun enrol(key: LoadKey, clock: Clock, deadline: Instant, retained: Boolean): Resource<Receipt> = resource {
         val id = Any()
         val candidate = Any()
+        if (state.peek().closed) return@resource Receipt(candidate, id, clock, closed = true)
         val inherited = active.get()
         val now = if (retained) clock.now() else deadline
         onRelease { _ -> finishReceipt(id) }
         val group = state.modify { current ->
-            val admitted = if (retained) current.admit(key) else null
-            val loadKey = admitted?.let { key.copy(epoch = it.admission.epoch) } ?: key
-            val fresh = admitted?.admission?.captured?.let { current.hit(it, now) }
-            val token = if (fresh == null) current.open[loadKey] ?: candidate else candidate
-            check(token !in inherited) { "recursive key load" }
-            val held = current.groups[token]
-                ?: Group(loadKey, deadline, outcome = fresh, admission = admitted?.admission)
-            val enrolled = current.copy(
-                open = if (fresh == null) current.open + (loadKey to token) else current.open,
-                receipts = current.receipts + (id to token),
-                groups = current.groups + (token to held.copy(members = held.members + 1)),
-            )
-            enrolled.retain(admitted?.policy ?: current.retention, admitted?.displaced.orEmpty()) to token
+            if (current.closed) current to null
+            else current.enrolReceipt(key, deadline, retained, now, id, candidate, inherited)
         }
-        Receipt(group, id, clock)
+        Receipt(group ?: candidate, id, clock, closed = group == null)
+    }
+
+    private fun State.enrolReceipt(
+        key: LoadKey,
+        deadline: Instant,
+        retained: Boolean,
+        now: Instant,
+        id: Any,
+        candidate: Any,
+        inherited: Set<Any>,
+    ): Pair<State, Any> {
+        val admitted = if (retained) admit(key) else null
+        val admission = admitted?.admission
+        val loadKey = if (admission == null) key else key.copy(epoch = admission.epoch)
+        val fresh = admission?.captured?.let { hit(it, now) }
+        val token = if (fresh == null) open[loadKey] ?: candidate else candidate
+        check(token !in inherited) { "recursive key load" }
+        val held = groups[token] ?: Group(loadKey, deadline, outcome = fresh, admission = admission)
+        val enrolled = copy(
+            open = if (fresh == null) open + (loadKey to token) else open,
+            receipts = receipts + (id to token),
+            groups = groups + (token to held.copy(members = held.members + 1)),
+        )
+        return enrolled.retain(admitted?.policy ?: retention, admitted?.displaced.orEmpty()) to token
     }
 
     private fun State.admit(key: LoadKey): KeyRetention.Admitted =
@@ -486,7 +515,23 @@ internal class KeyCacheLedger(
     fun revoke(owner: KeyOwner?) = resourceScope {
         checkNotInTransaction()
         onRelease { _ -> drain() }
+        publishRevocation(owner)
+    }
+
+    fun fenceForClose() = publishRevocation(null, closing = true)
+
+    fun closed(): Boolean = state.peek().closed
+
+    fun hasObligations(): Boolean {
+        val current = state.peek()
+        val live = current.groups.isNotEmpty() || current.receipts.isNotEmpty() || current.open.isNotEmpty()
+        val held = current.records.isNotEmpty() || current.prepared.isNotEmpty() || current.pending.isNotEmpty()
+        return live || held
+    }
+
+    private fun publishRevocation(owner: KeyOwner?, closing: Boolean = false) {
         state.update { current ->
+            if (closing && current.closed) return@update current
             val affected = current.records.values.filter { owner == null || it.slot.owner == owner }
             val pending = affected.mapNotNull { it.source as? Qualified }
                 .filter { it.revoked.modify { revoked -> true to !revoked } }
@@ -497,7 +542,8 @@ internal class KeyCacheLedger(
                 if (affectedGroup) group.copy(revoked = true) else group
             }
             val removed = if (owner == null) current.retention.forgetAll() else current.retention.forget(owner)
-            current.copy(groups = groups, pending = current.pending + pending).retain(removed.policy, removed.displaced)
+            current.copy(closed = closing || current.closed, groups = groups, pending = current.pending + pending)
+                .retain(removed.policy, removed.displaced)
         }
     }
 
@@ -709,7 +755,7 @@ internal class KeyCallers(private val flights: SingleFlight<Any, KeyError, Unit>
         }
     }
 
-    private enum class CloseStage { FENCE, STOP, OBSERVE, REAP }
+    private enum class CloseStage { FENCE, REVOKE, STOP, OBSERVE, REAP }
 
     private inner class Closing {
         val outcome = Invocation()
@@ -724,10 +770,11 @@ internal class KeyCallers(private val flights: SingleFlight<Any, KeyError, Unit>
             interrupted = Thread.interrupted() || interrupted || outcome.observed.any { it is InterruptedException }
         }
 
-        fun phase(stage: CloseStage) {
+        fun phase(stage: CloseStage, ledger: KeyCacheLedger?) {
             runPhase({
                 when (stage) {
                     CloseStage.FENCE -> fence()
+                    CloseStage.REVOKE -> checkNotNull(ledger).fenceForClose()
                     CloseStage.STOP -> flights.closeAndJoin()
                     CloseStage.OBSERVE -> observe()
                     CloseStage.REAP -> reap()
@@ -741,6 +788,8 @@ internal class KeyCallers(private val flights: SingleFlight<Any, KeyError, Unit>
                         fenced
                     }
 
+                    CloseStage.REVOKE -> checkNotNull(ledger).closed()
+
                     CloseStage.REAP -> state.peek().tickets.none { ticket -> terminal.any { it === ticket } }
 
                     CloseStage.STOP, CloseStage.OBSERVE -> false
@@ -748,7 +797,17 @@ internal class KeyCallers(private val flights: SingleFlight<Any, KeyError, Unit>
             })
         }
 
-        fun drain(ledger: KeyCacheLedger) = ledger.drainAfterClose(::runPhase)
+        fun drain(ledger: KeyCacheLedger, public: Boolean) {
+            if (!public) return ledger.drainAfterClose(::runPhase)
+            resourceScope {
+                onRelease { _ ->
+                    if (ledger.hasObligations()) {
+                        outcome.record(IllegalStateException("the key cache cleanup is incomplete"))
+                    }
+                }
+                onThrow(outcome::record) { ledger.drainAfterClose(::runPhase) }
+            }
+        }
 
         // A mixed fault ends its exact phase even when the state change committed.
         @Suppress("TooGenericExceptionCaught")
@@ -826,9 +885,13 @@ internal class KeyCallers(private val flights: SingleFlight<Any, KeyError, Unit>
 
     fun closeAndAwait() = closeAndAwait(null)
 
+    fun closeAndAwait(ledger: KeyCacheLedger?) = closeAndAwait(ledger, public = false)
+
+    fun closePublic(ledger: KeyCacheLedger) = closeAndAwait(ledger, public = true)
+
     // Capture inside the owner binding before restoration can mask it; outer capture retains restoration too.
     @Suppress("TooGenericExceptionCaught")
-    fun closeAndAwait(ledger: KeyCacheLedger?) {
+    private fun closeAndAwait(ledger: KeyCacheLedger?, public: Boolean) {
         checkNotInTransaction()
         check(identity !in active.get()) { "a key cache caller cannot close its owner" }
         val closing = Closing()
@@ -837,8 +900,10 @@ internal class KeyCallers(private val flights: SingleFlight<Any, KeyError, Unit>
             try {
                 active.locally(active.get() + identity) {
                     try {
-                        CloseStage.entries.forEach(closing::phase)
-                        ledger?.let(closing::drain)
+                        CloseStage.entries.forEach { stage ->
+                            if (public || stage != CloseStage.REVOKE) closing.phase(stage, ledger)
+                        }
+                        ledger?.let { closing.drain(it, public) }
                     } catch (failure: Throwable) {
                         closing.outcome.record(failure)
                     }
@@ -866,9 +931,12 @@ internal class KeyCallers(private val flights: SingleFlight<Any, KeyError, Unit>
         val ticket = Ticket()
         val invocation = Invocation()
 
-        fun <A> run(body: () -> A): A = withinOwner {
-            if (!admit(ticket, invocation)) throw checkNotNull(invocation.assembled())
-            body()
+        fun <A> run(body: () -> A, refuse: () -> A = ::closedKeyCache): A = withinOwner {
+            if (admit(ticket, invocation)) body()
+            else {
+                invocation.assembled()?.let { throw it }
+                refuse()
+            }
         }
 
         fun abort(call: KeyCacheLedger.DeliveryCall<*>) {
@@ -905,12 +973,22 @@ internal class KeyCallers(private val flights: SingleFlight<Any, KeyError, Unit>
         }
     }
 
+    fun <A> using(body: () -> Either<KeyError, A>): Either<KeyError, A> {
+        checkNotInTransaction()
+        val accepted = AcceptedCall()
+        try {
+            return accepted.run(body) { Either.Left(viewDenied) }
+        } finally {
+            accepted.ticket.finished.tryComplete(Unit)
+        }
+    }
+
     fun <A> deliver(call: KeyCacheLedger.DeliveryCall<A>): Either<KeyError, A> {
         checkNotInTransaction()
         val accepted = AcceptedCall()
         try {
             val answer = onThrow({ primary -> accepted.abortAfterFailure(call, primary) }) {
-                accepted.run { call.prepare(flights) }
+                accepted.run({ call.prepare(flights) }, call.refuse)
             }
             when (answer) {
                 is Either.Left -> accepted.abort(call)
@@ -938,7 +1016,6 @@ internal class KeyCallers(private val flights: SingleFlight<Any, KeyError, Unit>
             invocation.admitted = state.peek().tickets.any { it === ticket }
             return false
         }
-        check(invocation.admitted) { "the key cache is closed" }
-        return true
+        return invocation.admitted
     }
 }
