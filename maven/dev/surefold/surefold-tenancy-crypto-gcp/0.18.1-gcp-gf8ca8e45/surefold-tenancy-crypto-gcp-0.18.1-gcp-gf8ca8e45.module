@@ -1,0 +1,123 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "dev.surefold",
+    "module": "surefold-tenancy-crypto-gcp",
+    "version": "0.18.1-gcp-gf8ca8e45",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.7.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold-tenancy-crypto",
+          "version": {
+            "requires": "0.18.1-gcp-gf8ca8e45"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-tenancy-crypto-gcp-0.18.1-gcp-gf8ca8e45.jar",
+          "url": "surefold-tenancy-crypto-gcp-0.18.1-gcp-gf8ca8e45.jar",
+          "size": 40754,
+          "sha512": "107ee2808737d39e1b1745f15cde20e9d3cee92c3a53ca4afa5f34af9d62c0a164d7cfe36d9184ea7223657a1cf52e6f0508a6ecab371a8477e5ca13784574e4",
+          "sha256": "83fe3fb7679835a5d633c8ab9cb8a13ccc613889b07f8cea112d1ddf3d8a9e4f",
+          "sha1": "781ca02fdf69d0a4041c5f992881f1060956c7bb",
+          "md5": "34bae05ee5959bef979652d61742e584"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "org.jetbrains.kotlinx",
+          "module": "kotlinx-serialization-json",
+          "version": {
+            "requires": "1.11.0"
+          }
+        },
+        {
+          "group": "dev.surefold",
+          "module": "surefold-tenancy-crypto",
+          "version": {
+            "requires": "0.18.1-gcp-gf8ca8e45"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-tenancy-crypto-gcp-0.18.1-gcp-gf8ca8e45.jar",
+          "url": "surefold-tenancy-crypto-gcp-0.18.1-gcp-gf8ca8e45.jar",
+          "size": 40754,
+          "sha512": "107ee2808737d39e1b1745f15cde20e9d3cee92c3a53ca4afa5f34af9d62c0a164d7cfe36d9184ea7223657a1cf52e6f0508a6ecab371a8477e5ca13784574e4",
+          "sha256": "83fe3fb7679835a5d633c8ab9cb8a13ccc613889b07f8cea112d1ddf3d8a9e4f",
+          "sha1": "781ca02fdf69d0a4041c5f992881f1060956c7bb",
+          "md5": "34bae05ee5959bef979652d61742e584"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "surefold-tenancy-crypto-gcp-0.18.1-gcp-gf8ca8e45-sources.jar",
+          "url": "surefold-tenancy-crypto-gcp-0.18.1-gcp-gf8ca8e45-sources.jar",
+          "size": 7634,
+          "sha512": "c5d5f92ea9b94d6b0a9f1eb3f06cb5ce9c4504419385be3ae3bd59954edeb645da8169c671b5c621bd694032bd8f7ddd89bdc7401ce20bc2c6fa34840e416477",
+          "sha256": "d305d8127fb8658a69a234e06349877ac43bbbf7d9184c7059d6b04be9be6b7d",
+          "sha1": "2edb2a27b6a41026b0d49eda5d23d44be70b971f",
+          "md5": "e5d275bba1a3bb3c69379db1d4978709"
+        }
+      ]
+    }
+  ]
+}

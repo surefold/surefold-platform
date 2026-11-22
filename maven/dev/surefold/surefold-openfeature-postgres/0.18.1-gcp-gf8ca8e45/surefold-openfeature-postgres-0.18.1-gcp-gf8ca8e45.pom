@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <!-- This module was also published with a richer model, Gradle metadata,  -->
+  <!-- which should be used instead. Do not delete the following line which  -->
+  <!-- is to indicate to Gradle or any Gradle module metadata file consumer  -->
+  <!-- that they should prefer consuming it instead. -->
+  <!-- do_not_remove: published-with-gradle-metadata -->
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>dev.surefold</groupId>
+  <artifactId>surefold-openfeature-postgres</artifactId>
+  <version>0.18.1-gcp-gf8ca8e45</version>
+  <name>surefold-openfeature-postgres</name>
+  <description>Feature flags per tenant from a Postgres table, read under its row-level security policy, for OpenFeature.</description>
+  <url>https://github.com/surefold/surefold-platform</url>
+  <licenses>
+    <license>
+      <name>The Apache License, Version 2.0</name>
+      <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+    </license>
+  </licenses>
+  <developers>
+    <developer>
+      <id>matthewjones372</id>
+      <name>Matt Jones</name>
+    </developer>
+  </developers>
+  <scm>
+    <connection>scm:git:https://github.com/surefold/surefold-platform.git</connection>
+    <developerConnection>scm:git:ssh://git@github.com/surefold/surefold-platform.git</developerConnection>
+    <url>https://github.com/surefold/surefold-platform</url>
+  </scm>
+  <dependencies>
+    <dependency>
+      <groupId>dev.surefold</groupId>
+      <artifactId>surefold-openfeature</artifactId>
+      <version>0.18.0</version>
+      <scope>compile</scope>
+    </dependency>
+    <dependency>
+      <groupId>dev.surefold</groupId>
+      <artifactId>surefold-tenancy</artifactId>
+      <version>0.18.1-gcp-gf8ca8e45</version>
+      <scope>compile</scope>
+    </dependency>
+    <dependency>
+      <groupId>dev.surefold</groupId>
+      <artifactId>surefold-cache</artifactId>
+      <version>0.18.1</version>
+      <scope>compile</scope>
+    </dependency>
+    <dependency>
+      <groupId>dev.surefold</groupId>
+      <artifactId>surefold-postgres-notify</artifactId>
+      <version>0.18.1-gcp-gf8ca8e45</version>
+      <scope>compile</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.jetbrains.kotlin</groupId>
+      <artifactId>kotlin-stdlib</artifactId>
+      <version>2.4.10</version>
+      <scope>compile</scope>
+    </dependency>
+  </dependencies>
+</project>

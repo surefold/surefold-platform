@@ -1,0 +1,130 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "dev.surefold",
+    "module": "surefold-idempotency",
+    "version": "0.18.1-gcp-gf8ca8e45",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.7.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold",
+          "version": {
+            "requires": "0.18.1"
+          }
+        },
+        {
+          "group": "dev.surefold",
+          "module": "surefold-jobs",
+          "version": {
+            "requires": "0.18.1-gcp-gf8ca8e45"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-idempotency-0.18.1-gcp-gf8ca8e45.jar",
+          "url": "surefold-idempotency-0.18.1-gcp-gf8ca8e45.jar",
+          "size": 24810,
+          "sha512": "8c8ce38c02ef9b75cc68ac44048a725458de436bbc04e4293691119307c4f28067bae5331e2439ea01dc52746a4384152a66120db002313528262dda8586992d",
+          "sha256": "191186fc23565d4dbe57c65b46e29c4163f7557157d81c7abe71721780e0c81c",
+          "sha1": "4a45fda811c21f3bb94beae5f6c4de547e4c70ca",
+          "md5": "63500af0ce74c00ceccc144300988aeb"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold",
+          "version": {
+            "requires": "0.18.1"
+          }
+        },
+        {
+          "group": "dev.surefold",
+          "module": "surefold-jobs",
+          "version": {
+            "requires": "0.18.1-gcp-gf8ca8e45"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-idempotency-0.18.1-gcp-gf8ca8e45.jar",
+          "url": "surefold-idempotency-0.18.1-gcp-gf8ca8e45.jar",
+          "size": 24810,
+          "sha512": "8c8ce38c02ef9b75cc68ac44048a725458de436bbc04e4293691119307c4f28067bae5331e2439ea01dc52746a4384152a66120db002313528262dda8586992d",
+          "sha256": "191186fc23565d4dbe57c65b46e29c4163f7557157d81c7abe71721780e0c81c",
+          "sha1": "4a45fda811c21f3bb94beae5f6c4de547e4c70ca",
+          "md5": "63500af0ce74c00ceccc144300988aeb"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "surefold-idempotency-0.18.1-gcp-gf8ca8e45-sources.jar",
+          "url": "surefold-idempotency-0.18.1-gcp-gf8ca8e45-sources.jar",
+          "size": 6038,
+          "sha512": "6e2ae335aed5717d33dc41d0fd9590df9a7f7dfcbe7395547eda026d4d86b4e653ee60626fe34944fd91ea1f93482aad22e3bc7ec3356a0f3c544249261c3870",
+          "sha256": "f698d3773d3259b84b2c9c404537c1707574699e640f89864d820dae690f7563",
+          "sha1": "8587c3e769872e7f09805246f6662cb70ce01944",
+          "md5": "5cf5d87406c082a9433ceb34617ee344"
+        }
+      ]
+    }
+  ]
+}

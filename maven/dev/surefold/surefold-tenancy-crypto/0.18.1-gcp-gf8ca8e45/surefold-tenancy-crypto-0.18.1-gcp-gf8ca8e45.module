@@ -1,0 +1,116 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "dev.surefold",
+    "module": "surefold-tenancy-crypto",
+    "version": "0.18.1-gcp-gf8ca8e45",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.7.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold-tenancy",
+          "version": {
+            "requires": "0.18.1-gcp-gf8ca8e45"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-tenancy-crypto-0.18.1-gcp-gf8ca8e45.jar",
+          "url": "surefold-tenancy-crypto-0.18.1-gcp-gf8ca8e45.jar",
+          "size": 265502,
+          "sha512": "ac2cc71d9f30327e1b2c91c1569898ac885bbdbdb92a037879c398b8025e90f78cabf6dcc2c6875ccc97fe28d2c913dbf38b8ac615e26f3b341a85f82429d7e8",
+          "sha256": "a67ea0efbd521fe130d8f123b5bc2d9d970b7152890903f33ffe57b5a2a325ab",
+          "sha1": "7e6a22ecc2805c1764de00f55e5e7d5bdb7f9626",
+          "md5": "e4876132704c419782f6ac0332433031"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold-tenancy",
+          "version": {
+            "requires": "0.18.1-gcp-gf8ca8e45"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-tenancy-crypto-0.18.1-gcp-gf8ca8e45.jar",
+          "url": "surefold-tenancy-crypto-0.18.1-gcp-gf8ca8e45.jar",
+          "size": 265502,
+          "sha512": "ac2cc71d9f30327e1b2c91c1569898ac885bbdbdb92a037879c398b8025e90f78cabf6dcc2c6875ccc97fe28d2c913dbf38b8ac615e26f3b341a85f82429d7e8",
+          "sha256": "a67ea0efbd521fe130d8f123b5bc2d9d970b7152890903f33ffe57b5a2a325ab",
+          "sha1": "7e6a22ecc2805c1764de00f55e5e7d5bdb7f9626",
+          "md5": "e4876132704c419782f6ac0332433031"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "surefold-tenancy-crypto-0.18.1-gcp-gf8ca8e45-sources.jar",
+          "url": "surefold-tenancy-crypto-0.18.1-gcp-gf8ca8e45-sources.jar",
+          "size": 35537,
+          "sha512": "0e2c4d118527576253bd6e8d8f7a312b7d9d97852296295c1e4943d69640c64c50471784a3aeca92a2f7c9733876ef82075b610cb8388d506f7d10181fe4cda7",
+          "sha256": "b9531ff8856be9eeea39ad725c24a6934c1054d5320dbfe5c7afb7638bf45900",
+          "sha1": "9b7c09b493cc73fd61681ed6d78912a789d7fa9c",
+          "md5": "8580e47dd4d5d80054babef7775ff57a"
+        }
+      ]
+    }
+  ]
+}

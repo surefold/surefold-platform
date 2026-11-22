@@ -1,0 +1,130 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "dev.surefold",
+    "module": "surefold-app-jobs",
+    "version": "0.18.1-gcp-gf8ca8e45",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.7.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold-app",
+          "version": {
+            "requires": "0.18.1"
+          }
+        },
+        {
+          "group": "dev.surefold",
+          "module": "surefold-jobs",
+          "version": {
+            "requires": "0.18.1-gcp-gf8ca8e45"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-app-jobs-0.18.1-gcp-gf8ca8e45.jar",
+          "url": "surefold-app-jobs-0.18.1-gcp-gf8ca8e45.jar",
+          "size": 8934,
+          "sha512": "beae35e791ae7b193b23660204507cc45f8c726c1ac41a85ff2e522a8860c091b149fd6e5d3ecff33c46d3682d0ed89679f1bcada4bcf3cc20554e36fb019589",
+          "sha256": "fee1f0cdb8aea33d2e27161ad58598392293de826fe1606f8512cac2d45c3cf0",
+          "sha1": "a4e7a0980357e39065665926839e4da094ecc9a3",
+          "md5": "96e29880e5555f14e210aa836d9087bd"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold-app",
+          "version": {
+            "requires": "0.18.1"
+          }
+        },
+        {
+          "group": "dev.surefold",
+          "module": "surefold-jobs",
+          "version": {
+            "requires": "0.18.1-gcp-gf8ca8e45"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-app-jobs-0.18.1-gcp-gf8ca8e45.jar",
+          "url": "surefold-app-jobs-0.18.1-gcp-gf8ca8e45.jar",
+          "size": 8934,
+          "sha512": "beae35e791ae7b193b23660204507cc45f8c726c1ac41a85ff2e522a8860c091b149fd6e5d3ecff33c46d3682d0ed89679f1bcada4bcf3cc20554e36fb019589",
+          "sha256": "fee1f0cdb8aea33d2e27161ad58598392293de826fe1606f8512cac2d45c3cf0",
+          "sha1": "a4e7a0980357e39065665926839e4da094ecc9a3",
+          "md5": "96e29880e5555f14e210aa836d9087bd"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "surefold-app-jobs-0.18.1-gcp-gf8ca8e45-sources.jar",
+          "url": "surefold-app-jobs-0.18.1-gcp-gf8ca8e45-sources.jar",
+          "size": 1219,
+          "sha512": "7df4017b24b6b09b93a2ba5e9d2a378fb5c20738cc8a1d147b6620449bba59f0b1386d12a4e413108c7d1d48ea61d1e80b08a82ad163d127706368ce49bfa6bc",
+          "sha256": "4a2d2da621de2475e2378404fbc76d6a3b69581d75a4e2c3c1d8a2d5935889a7",
+          "sha1": "14dd5862239943531afd757fd1f58d9c90cfd452",
+          "md5": "6a03abc490e63566b1223320706df388"
+        }
+      ]
+    }
+  ]
+}

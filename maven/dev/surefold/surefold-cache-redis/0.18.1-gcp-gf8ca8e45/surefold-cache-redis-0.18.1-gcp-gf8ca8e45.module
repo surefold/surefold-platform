@@ -1,0 +1,130 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "dev.surefold",
+    "module": "surefold-cache-redis",
+    "version": "0.18.1-gcp-gf8ca8e45",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.7.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold-cache",
+          "version": {
+            "requires": "0.18.1"
+          }
+        },
+        {
+          "group": "io.lettuce",
+          "module": "lettuce-core",
+          "version": {
+            "requires": "6.5.0.RELEASE"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-cache-redis-0.18.1-gcp-gf8ca8e45.jar",
+          "url": "surefold-cache-redis-0.18.1-gcp-gf8ca8e45.jar",
+          "size": 11316,
+          "sha512": "ac5a910d483c0145d0cda5c6e04bb1d968ad2f036c2a754559da8dd119eb3b32dcc9e5cc81ddd7b7bb44870c61f184e0de3355bcd82df8f02ba3e656d5226eda",
+          "sha256": "ef7a2897dc018c0ec58cdd09f4713c32ad9dee8eb88213e52a5ee92a3233fb63",
+          "sha1": "f17dad3646cf7369a07bcc3792bf7397e2812578",
+          "md5": "27d3b04f9909cc4b41832663fe02de6c"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold-cache",
+          "version": {
+            "requires": "0.18.1"
+          }
+        },
+        {
+          "group": "io.lettuce",
+          "module": "lettuce-core",
+          "version": {
+            "requires": "6.5.0.RELEASE"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-cache-redis-0.18.1-gcp-gf8ca8e45.jar",
+          "url": "surefold-cache-redis-0.18.1-gcp-gf8ca8e45.jar",
+          "size": 11316,
+          "sha512": "ac5a910d483c0145d0cda5c6e04bb1d968ad2f036c2a754559da8dd119eb3b32dcc9e5cc81ddd7b7bb44870c61f184e0de3355bcd82df8f02ba3e656d5226eda",
+          "sha256": "ef7a2897dc018c0ec58cdd09f4713c32ad9dee8eb88213e52a5ee92a3233fb63",
+          "sha1": "f17dad3646cf7369a07bcc3792bf7397e2812578",
+          "md5": "27d3b04f9909cc4b41832663fe02de6c"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "surefold-cache-redis-0.18.1-gcp-gf8ca8e45-sources.jar",
+          "url": "surefold-cache-redis-0.18.1-gcp-gf8ca8e45-sources.jar",
+          "size": 3047,
+          "sha512": "29ed8a8dc303eff70c8a23a3f392508f3047c0c3ddbba8e41f1a8897e67f95ee6046d4a9871265d10fbb0fee0d6f8056221f241cafee65fdb3b7e5da4d5d2003",
+          "sha256": "fe3a0d2d4dc7c304cc469ef48f40d38e745c2d17431e42f1ac8fcc94a1eca335",
+          "sha1": "ce1dd49893ee9f155e2174f2990066bb16d5e7b2",
+          "md5": "07e39ca705f968fea6c448210e000386"
+        }
+      ]
+    }
+  ]
+}

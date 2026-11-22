@@ -1,0 +1,123 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "dev.surefold",
+    "module": "surefold-auth",
+    "version": "0.18.1-gcp-gf8ca8e45",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.7.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold",
+          "version": {
+            "requires": "0.18.1"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-auth-0.18.1-gcp-gf8ca8e45.jar",
+          "url": "surefold-auth-0.18.1-gcp-gf8ca8e45.jar",
+          "size": 87986,
+          "sha512": "93130807e39920fd26d6041f0b04e45384b5d03e0be90f47afe8a9a1e438b965eb80e1123bc56b17a8d3c6c2e5474da579aaef4c3a0c9267fa99396b3746fe2b",
+          "sha256": "98cdbb870e843f93a01fa8536b5f14768d6f0bb7eb0ace96d1c7768b5df561a1",
+          "sha1": "e0b4c57c5fceeb6a54306070c129745bf2ada668",
+          "md5": "5de4006eacdd49e1f575194817dfda52"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "org.bouncycastle",
+          "module": "bcprov-jdk18on",
+          "version": {
+            "requires": "1.85"
+          }
+        },
+        {
+          "group": "dev.surefold",
+          "module": "surefold",
+          "version": {
+            "requires": "0.18.1"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-auth-0.18.1-gcp-gf8ca8e45.jar",
+          "url": "surefold-auth-0.18.1-gcp-gf8ca8e45.jar",
+          "size": 87986,
+          "sha512": "93130807e39920fd26d6041f0b04e45384b5d03e0be90f47afe8a9a1e438b965eb80e1123bc56b17a8d3c6c2e5474da579aaef4c3a0c9267fa99396b3746fe2b",
+          "sha256": "98cdbb870e843f93a01fa8536b5f14768d6f0bb7eb0ace96d1c7768b5df561a1",
+          "sha1": "e0b4c57c5fceeb6a54306070c129745bf2ada668",
+          "md5": "5de4006eacdd49e1f575194817dfda52"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "surefold-auth-0.18.1-gcp-gf8ca8e45-sources.jar",
+          "url": "surefold-auth-0.18.1-gcp-gf8ca8e45-sources.jar",
+          "size": 17441,
+          "sha512": "e4a7f9d1249e7f0bf72168298df61af26368a96f62397a3b16263a69ba6a15a66d6c7108a2f3ab7a604e724f36cbda012fece795fe415ab314b8d66d1897048b",
+          "sha256": "ff660d12b1e82f4c5fc257ac1692471637428f9b035909b3a27a9322bcac83b0",
+          "sha1": "11bdc7e506cbba48fa989ca264a4ec24212454ac",
+          "md5": "104e030b2537668cc0ea6bc977fb7fd0"
+        }
+      ]
+    }
+  ]
+}
