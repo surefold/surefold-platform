@@ -8,7 +8,7 @@ name: pages
 # Run by hand, only when someone needs a build of an unreleased commit, so the
 # `gh-pages` branch stays small. The version names the commit and is never a
 # snapshot or a release: `<base>-<label>-g<first 8 hex of the commit>`, e.g.
-# `0.18.0-gcp-gcde2b49`. A version once published is never written again, and
+# `0.18.0-gcp-gcde2b499`. A version once published is never written again, and
 # a dispatch for one that is already there fails without writing. Releases stay
 # on Central (release.yml), which this does not touch.
 on:
