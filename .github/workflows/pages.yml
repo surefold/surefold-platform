@@ -1,0 +1,217 @@
+name: pages
+
+# A commit of main, built and published as a static Maven repository on this
+# repository's GitHub Pages site: https://surefold.github.io/surefold-platform/maven.
+# Pages serves it with no token, which GitHub Packages (snapshot.yml) cannot do
+# even for a public package. surefold-core's pages.yml, adapted.
+#
+# Run by hand, only when someone needs a build of an unreleased commit, so the
+# `gh-pages` branch stays small. The version names the commit and is never a
+# snapshot or a release: `<base>-<label>-g<first 8 hex of the commit>`, e.g.
+# `0.18.0-gcp-gcde2b49`. A version once published is never written again, and
+# a dispatch for one that is already there fails without writing. Releases stay
+# on Central (release.yml), which this does not touch.
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "Full SHA of the commit on main to publish."
+        type: string
+        required: true
+      label:
+        description: "Lower-case letters and digits between the base version and the commit, e.g. gcp."
+        type: string
+        default: gcp
+      base:
+        description: "X.Y.Z before the label. Empty: the one the build derives (0.18.1 until this repository's first tag)."
+        type: string
+        default: ""
+      core:
+        description: "surefold-core release on Central to build against. Empty: gradle.properties' surefoldCore."
+        type: string
+        default: ""
+      integrations:
+        description: "surefold-integrations release on Central to build against. Empty: gradle.properties' surefoldIntegrations."
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+# One publish at a time: two would race to push gh-pages.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  pages:
+    runs-on: ubuntu-24.04
+    # To push the gh-pages branch. Nothing else here writes to the repository.
+    # No signing key: a Pages build is not signed, and a job that does not hold
+    # the key cannot sign a release by mistake. No packages token either: the
+    # upstreams come from Central (below).
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check the inputs
+        run: |
+          printf '%s' "$COMMIT" | grep -Eqx '[0-9a-f]{40}' || { echo "commit must be a full 40-hex SHA, not $COMMIT"; exit 1; }
+          printf '%s' "$LABEL" | grep -Eqx '[a-z0-9]+' || { echo "label must be lower-case letters and digits, not $LABEL"; exit 1; }
+          [ -z "$BASE" ] || printf '%s' "$BASE" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+' || { echo "base must be X.Y.Z, not $BASE"; exit 1; }
+        env:
+          COMMIT: ${{ inputs.commit }}
+          LABEL: ${{ inputs.label }}
+          BASE: ${{ inputs.base }}
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
+          # The base version is derived from the nearest `v` tag, and a shallow
+          # checkout has no tags to derive it from. Full history also brings
+          # main and gh-pages.
+          fetch-depth: 0
+
+      - name: Only a commit of main
+        run: |
+          git merge-base --is-ancestor "$COMMIT" origin/main || { echo "$COMMIT is not on main"; exit 1; }
+        env:
+          COMMIT: ${{ inputs.commit }}
+
+      # gradle.properties pins upstream snapshots on GitHub Packages, which ask
+      # for a token even to read. A build here depending on one would publish a
+      # POM nobody can resolve without a token, so the pins must be releases on
+      # Central. Exported for every Gradle run below; the environment outranks
+      # gradle.properties. CI never has an upstream checked out beside this one,
+      # so the pins are what it builds against.
+      - name: Upstream releases
+        run: |
+          for pin in surefoldCore:"$CORE" surefoldIntegrations:"$INTEGRATIONS"; do
+            name=${pin%%:*}
+            version=${pin#*:}
+            [ -n "$version" ] || version=$(sed -n "s/^$name=//p" gradle.properties)
+            printf '%s' "$version" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+' ||
+              { echo "$name is $version; pass a release on Central"; exit 1; }
+            echo "$name: $version"
+            echo "ORG_GRADLE_PROJECT_$name=$version" >> "$GITHUB_ENV"
+          done
+        env:
+          CORE: ${{ inputs.core }}
+          INTEGRATIONS: ${{ inputs.integrations }}
+
+      # The same as release.yml: 25 is the toolchain.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # axion reads `0.18.1-SNAPSHOT` off any commit before this repository's
+      # first tag (its initialVersion), and `X.Y.Z` on a tag itself: either way
+      # the derived base is the X.Y.Z part. `base` overrides it.
+      - name: Version
+        id: version
+        run: |
+          base=$BASE
+          if [ -z "$base" ]; then
+            current=$(./gradlew -q currentVersion | awk 'NF { last = $NF } END { print last }')
+            base=${current%-SNAPSHOT}
+          fi
+          printf '%s' "$base" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+' || { echo "cannot take a base version from $base"; exit 1; }
+          version="$base-$LABEL-g$(printf '%s' "$COMMIT" | cut -c1-8)"
+          # Never a release's plain X.Y.Z, and never a snapshot.
+          printf '%s' "$version" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+-[a-z0-9]+-g[0-9a-f]{8}' || { echo "refusing version $version"; exit 1; }
+          echo "version: $version"
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+        env:
+          BASE: ${{ inputs.base }}
+          COMMIT: ${{ inputs.commit }}
+          LABEL: ${{ inputs.label }}
+
+      # axion keeps `-SNAPSHOT` on a forced version off a tag, and a Pages build
+      # is not a snapshot. A tag in this runner's clone only, never pushed (the
+      # push below names gh-pages alone), makes the commit read as the version
+      # itself. It works on any commit of main, including ones older than this
+      # workflow, since the build needs no change for it. release.yml is
+      # dispatch-only and tags its own X.Y.Z, so a `v*-*` tag means nothing to it.
+      - name: Tag the version here only
+        run: |
+          git -c tag.gpgsign=false tag "v$VERSION" "$COMMIT"
+          read=$(./gradlew -q currentVersion -Prelease.forceVersion="$VERSION" | awk 'NF { last = $NF } END { print last }')
+          [ "$read" = "$VERSION" ] || { echo "the build reads $read, not $VERSION"; exit 1; }
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+          COMMIT: ${{ inputs.commit }}
+
+      # gh-pages beside the build, not inside it. The first run starts the branch.
+      - name: Check out gh-pages
+        run: |
+          site="$RUNNER_TEMP/gh-pages"
+          if git rev-parse --verify -q origin/gh-pages >/dev/null; then
+            git worktree add --detach "$site" origin/gh-pages
+          else
+            git worktree add --orphan -b gh-pages "$site"
+            # Serve the files as they are, without Jekyll.
+            touch "$site/.nojekyll"
+          fi
+
+      # Before anything is built or written: a version already there is never rewritten.
+      - name: Refuse a version already published
+        run: |
+          site="$RUNNER_TEMP/gh-pages"
+          if [ -d "$site/maven/dev/surefold" ]; then
+            found=$(find "$site/maven/dev/surefold" -mindepth 2 -type d -name "$VERSION")
+            if [ -n "$found" ]; then
+              echo "$VERSION is already published:"; echo "$found"; exit 1
+            fi
+          fi
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+
+      # Every module's javadoc jar, six modules to a Gradle run, as release.yml
+      # does: one run rendering all of them has outgrown a runner before.
+      - name: Javadoc, six modules at a time
+        run: |
+          ./gradlew --stop
+          tasks=$(./gradlew --no-daemon -q tasks --all | grep -oE '^[a-z0-9-]+:dokkaGeneratePublicationHtml' | sort -u | sed 's/^/:/')
+          echo "$tasks" | xargs -n 6 ./gradlew --no-daemon --max-workers=2
+
+      # Every module into the build's own `local` repository (build/repo),
+      # unsigned. No pull request build has run this commit's publications, so
+      # this one does.
+      - name: Publish to build/repo
+        run: >
+          ./gradlew publishAllPublicationsToLocalRepository --no-configuration-cache --max-workers=2
+          -Prelease.forceVersion=${{ steps.version.outputs.value }}
+
+      # Only dev.surefold, so not the relocation POMs at the old group, which are
+      # for Central.
+      # shortcut: no maven-metadata.xml, so a version resolves only when named
+      # exactly, not by a range or `latest`; merge the metadata if that is needed.
+      - name: Copy into gh-pages
+        run: |
+          find build/repo -name 'maven-metadata.xml*' -delete
+          mkdir -p "$RUNNER_TEMP/gh-pages/maven"
+          cp -R build/repo/dev "$RUNNER_TEMP/gh-pages/maven/"
+
+      # A new version only adds files: anything changed or removed means
+      # something already published would be rewritten.
+      - name: Push gh-pages
+        run: |
+          cd "$RUNNER_TEMP/gh-pages"
+          git add -A
+          if git rev-parse --verify -q HEAD >/dev/null; then
+            rewritten=$(git diff --cached --name-only --diff-filter=DMRT HEAD)
+            if [ -n "$rewritten" ]; then
+              echo "refusing to rewrite published files:"; echo "$rewritten"; exit 1
+            fi
+          fi
+          find maven -type d -name "$VERSION" -exec du -sk {} + |
+            awk -v v="$VERSION" '{ kb += $1; n++ } END { printf "%s: %d directories, %.1f MB\n", v, n, kb / 1024 }'
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "Publish $VERSION from $COMMIT"
+          git push origin HEAD:refs/heads/gh-pages
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+          COMMIT: ${{ inputs.commit }}
