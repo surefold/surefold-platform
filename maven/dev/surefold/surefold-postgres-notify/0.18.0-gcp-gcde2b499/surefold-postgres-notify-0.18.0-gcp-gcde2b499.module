@@ -1,0 +1,116 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "dev.surefold",
+    "module": "surefold-postgres-notify",
+    "version": "0.18.0-gcp-gcde2b499",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.7.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold-stream",
+          "version": {
+            "requires": "0.18.1"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-postgres-notify-0.18.0-gcp-gcde2b499.jar",
+          "url": "surefold-postgres-notify-0.18.0-gcp-gcde2b499.jar",
+          "size": 22771,
+          "sha512": "018bfd34fb2baaba4466d979f42c9703436e56c3f7e76716d210eb9c6d92314e5dadd1aefd7e371e3b5d74ba13a57d00e157cab45c8b6b931815cc163f64b57d",
+          "sha256": "0ec7bb68efc9c3ef879797eefb9d63f0390b3e16d588cbd4f496f4890a0ff4d5",
+          "sha1": "b268197334e628b5166867ca5fb8df4a819f7eaa",
+          "md5": "b53511659501e4953f5b42489c5e19df"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold-stream",
+          "version": {
+            "requires": "0.18.1"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-postgres-notify-0.18.0-gcp-gcde2b499.jar",
+          "url": "surefold-postgres-notify-0.18.0-gcp-gcde2b499.jar",
+          "size": 22771,
+          "sha512": "018bfd34fb2baaba4466d979f42c9703436e56c3f7e76716d210eb9c6d92314e5dadd1aefd7e371e3b5d74ba13a57d00e157cab45c8b6b931815cc163f64b57d",
+          "sha256": "0ec7bb68efc9c3ef879797eefb9d63f0390b3e16d588cbd4f496f4890a0ff4d5",
+          "sha1": "b268197334e628b5166867ca5fb8df4a819f7eaa",
+          "md5": "b53511659501e4953f5b42489c5e19df"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "surefold-postgres-notify-0.18.0-gcp-gcde2b499-sources.jar",
+          "url": "surefold-postgres-notify-0.18.0-gcp-gcde2b499-sources.jar",
+          "size": 4736,
+          "sha512": "cac5c665d9b437409bad929cb4299e12235e657aff1c28f1c9f5676a2f8e3b0a493797cf04d3df9460c2b4b534660d88137367f59bf38aa6d989fad2ebf4657f",
+          "sha256": "8984119fedc667d7cb9f1149722ae695139bdf7ae631f9b0f99cb756e029e1fb",
+          "sha1": "b10943a5f12f476ab786f56d95f9631c417a6788",
+          "md5": "65a6809088c2647b74cda144542641fb"
+        }
+      ]
+    }
+  ]
+}

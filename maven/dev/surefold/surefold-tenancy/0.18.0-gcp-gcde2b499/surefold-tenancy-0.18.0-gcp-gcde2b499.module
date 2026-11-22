@@ -1,0 +1,264 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "dev.surefold",
+    "module": "surefold-tenancy",
+    "version": "0.18.0-gcp-gcde2b499",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.7.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold",
+          "version": {
+            "requires": "0.18.1"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-tenancy-0.18.0-gcp-gcde2b499.jar",
+          "url": "surefold-tenancy-0.18.0-gcp-gcde2b499.jar",
+          "size": 32419,
+          "sha512": "b08d47c1ab80b1ce68b669329741577c87b5156d2f29aa65edb24a405b0853c40cd2bfc474c3aae3c0d2f7e58fddaae581bcae9c3911912d4f2c8cbf0c268e0a",
+          "sha256": "ecf0a20533af473b2442f5f4fdad2ab5b05ec8635ad306a63f6ecad54dd7ce20",
+          "sha1": "0be2df5cd8cb560b5fcb4bbaf65077eb850c1456",
+          "md5": "b585e59d6ef0bf759dbd241e76b7227d"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold",
+          "version": {
+            "requires": "0.18.1"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-tenancy-0.18.0-gcp-gcde2b499.jar",
+          "url": "surefold-tenancy-0.18.0-gcp-gcde2b499.jar",
+          "size": 32419,
+          "sha512": "b08d47c1ab80b1ce68b669329741577c87b5156d2f29aa65edb24a405b0853c40cd2bfc474c3aae3c0d2f7e58fddaae581bcae9c3911912d4f2c8cbf0c268e0a",
+          "sha256": "ecf0a20533af473b2442f5f4fdad2ab5b05ec8635ad306a63f6ecad54dd7ce20",
+          "sha1": "0be2df5cd8cb560b5fcb4bbaf65077eb850c1456",
+          "md5": "b585e59d6ef0bf759dbd241e76b7227d"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "surefold-tenancy-0.18.0-gcp-gcde2b499-sources.jar",
+          "url": "surefold-tenancy-0.18.0-gcp-gcde2b499-sources.jar",
+          "size": 8042,
+          "sha512": "f48862a438dc5b33ba5f7c682c92b6b5317bd919cabb13120d0a9ea7fb3be013086e9ccbee9a72ade6dfba7bf0d06e4f13f0f3796434bf2e876772fd61174ad8",
+          "sha256": "751194eac82df6f912cba02faebc91269397df91c75db400f505dc2225cd1645",
+          "sha1": "f248e86754d55831bfb9c7a5a76fcc981c9e2d4f",
+          "md5": "9ca3a452c87d781a850348977156b7a1"
+        }
+      ]
+    },
+    {
+      "name": "testFixturesApiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold-tenancy",
+          "version": {
+            "requires": "0.18.0-gcp-gcde2b499"
+          }
+        },
+        {
+          "group": "dev.surefold",
+          "module": "surefold-actor-journal-jdbc",
+          "version": {
+            "requires": "0.18.1"
+          },
+          "requestedCapabilities": [
+            {
+              "group": "dev.surefold",
+              "name": "surefold-actor-journal-jdbc-test-fixtures"
+            }
+          ]
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-tenancy-0.18.0-gcp-gcde2b499-test-fixtures.jar",
+          "url": "surefold-tenancy-0.18.0-gcp-gcde2b499-test-fixtures.jar",
+          "size": 7132,
+          "sha512": "7af9519d40d6c7548a862ee17ca56d5112587b291f5483d0eb842d3514065ac5f50479f965911c17f8d0192e35c05b3359d7a294d0c2dc039bec45e9a2c18c2e",
+          "sha256": "beb5400f7acac2b35fd24c285b3e492f1ddbd84c567011126f1f60afb376240d",
+          "sha1": "ac44033f9fc50c3bda48834c73253d3800748e87",
+          "md5": "276b34537d9d20c75c9b6189c16307b9"
+        }
+      ],
+      "capabilities": [
+        {
+          "group": "dev.surefold",
+          "name": "surefold-tenancy-test-fixtures",
+          "version": "0.18.0-gcp-gcde2b499"
+        }
+      ]
+    },
+    {
+      "name": "testFixturesRuntimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime"
+      },
+      "dependencies": [
+        {
+          "group": "org.liquibase",
+          "module": "liquibase-core",
+          "version": {
+            "requires": "4.32.0"
+          }
+        },
+        {
+          "group": "dev.surefold",
+          "module": "surefold-tenancy",
+          "version": {
+            "requires": "0.18.0-gcp-gcde2b499"
+          }
+        },
+        {
+          "group": "dev.surefold",
+          "module": "surefold-actor-journal-jdbc",
+          "version": {
+            "requires": "0.18.1"
+          },
+          "requestedCapabilities": [
+            {
+              "group": "dev.surefold",
+              "name": "surefold-actor-journal-jdbc-test-fixtures"
+            }
+          ]
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-tenancy-0.18.0-gcp-gcde2b499-test-fixtures.jar",
+          "url": "surefold-tenancy-0.18.0-gcp-gcde2b499-test-fixtures.jar",
+          "size": 7132,
+          "sha512": "7af9519d40d6c7548a862ee17ca56d5112587b291f5483d0eb842d3514065ac5f50479f965911c17f8d0192e35c05b3359d7a294d0c2dc039bec45e9a2c18c2e",
+          "sha256": "beb5400f7acac2b35fd24c285b3e492f1ddbd84c567011126f1f60afb376240d",
+          "sha1": "ac44033f9fc50c3bda48834c73253d3800748e87",
+          "md5": "276b34537d9d20c75c9b6189c16307b9"
+        }
+      ],
+      "capabilities": [
+        {
+          "group": "dev.surefold",
+          "name": "surefold-tenancy-test-fixtures",
+          "version": "0.18.0-gcp-gcde2b499"
+        }
+      ]
+    },
+    {
+      "name": "testFixturesSourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "surefold-tenancy-0.18.0-gcp-gcde2b499-test-fixtures-sources.jar",
+          "url": "surefold-tenancy-0.18.0-gcp-gcde2b499-test-fixtures-sources.jar",
+          "size": 2300,
+          "sha512": "ae9537169c720ab1427c4e6463c77bfba66ea21feb0197686c97debfa84cf8c820fbfc24cbf6402c9e9c943e673d6f08dc0ba31df2d613fd38bc001a3fca9a97",
+          "sha256": "a4d59cd52660f4449bef0ed7dedaa301cde83659a9302d5b6e0a4fd8730c36eb",
+          "sha1": "7147f065b0a2606899c163f083af9a364ca523a9",
+          "md5": "56948dda087cae57572cf4f20af16b23"
+        }
+      ],
+      "capabilities": [
+        {
+          "group": "dev.surefold",
+          "name": "surefold-tenancy-test-fixtures",
+          "version": "0.18.0-gcp-gcde2b499"
+        }
+      ]
+    }
+  ]
+}

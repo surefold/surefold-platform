@@ -1,0 +1,137 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "dev.surefold",
+    "module": "surefold-app-flyway",
+    "version": "0.18.0-gcp-gcde2b499",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.7.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold-app",
+          "version": {
+            "requires": "0.18.1"
+          }
+        },
+        {
+          "group": "org.flywaydb",
+          "module": "flyway-core",
+          "version": {
+            "requires": "13.9.0"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-app-flyway-0.18.0-gcp-gcde2b499.jar",
+          "url": "surefold-app-flyway-0.18.0-gcp-gcde2b499.jar",
+          "size": 23736,
+          "sha512": "a2922bf97d17178e7e5cad3565834d030425355470d2989329704d9e416eca1bf3f28d57e3b623de16802e5f22892738dfb0e094132c17fe116189992094b3b9",
+          "sha256": "47eed15c9f67d939dbb68882ed985c96c5653c0a01be4e0458aee6923d3c0e00",
+          "sha1": "97edbc983654b1a51dbb32953b43c0d50309895b",
+          "md5": "3305aa576498791821819bdc734780d2"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "org.flywaydb",
+          "module": "flyway-database-postgresql",
+          "version": {
+            "requires": "13.9.0"
+          }
+        },
+        {
+          "group": "dev.surefold",
+          "module": "surefold-app",
+          "version": {
+            "requires": "0.18.1"
+          }
+        },
+        {
+          "group": "org.flywaydb",
+          "module": "flyway-core",
+          "version": {
+            "requires": "13.9.0"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-app-flyway-0.18.0-gcp-gcde2b499.jar",
+          "url": "surefold-app-flyway-0.18.0-gcp-gcde2b499.jar",
+          "size": 23736,
+          "sha512": "a2922bf97d17178e7e5cad3565834d030425355470d2989329704d9e416eca1bf3f28d57e3b623de16802e5f22892738dfb0e094132c17fe116189992094b3b9",
+          "sha256": "47eed15c9f67d939dbb68882ed985c96c5653c0a01be4e0458aee6923d3c0e00",
+          "sha1": "97edbc983654b1a51dbb32953b43c0d50309895b",
+          "md5": "3305aa576498791821819bdc734780d2"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "surefold-app-flyway-0.18.0-gcp-gcde2b499-sources.jar",
+          "url": "surefold-app-flyway-0.18.0-gcp-gcde2b499-sources.jar",
+          "size": 5438,
+          "sha512": "e6624da059927036c76bfea17d4e7a7f3e8d3802ad041641fa70156a3d13e0178cf6d52af53d1d6531cbd42c2177ef3dfb38cfa509fbfa4e26f760e9c5314f09",
+          "sha256": "4e662ee60b93485e3c326e3c34d32fd5c3330dcecc0da7b014277534f0551784",
+          "sha1": "662c84c7446ff415c62eb2056dab3c8180088fc0",
+          "md5": "ae93aa3ed42b1157698238bcf9662a4a"
+        }
+      ]
+    }
+  ]
+}

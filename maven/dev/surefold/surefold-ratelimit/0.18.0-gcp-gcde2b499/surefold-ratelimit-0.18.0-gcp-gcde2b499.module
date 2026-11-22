@@ -1,0 +1,116 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "dev.surefold",
+    "module": "surefold-ratelimit",
+    "version": "0.18.0-gcp-gcde2b499",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.7.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold",
+          "version": {
+            "requires": "0.18.1"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-ratelimit-0.18.0-gcp-gcde2b499.jar",
+          "url": "surefold-ratelimit-0.18.0-gcp-gcde2b499.jar",
+          "size": 18679,
+          "sha512": "32bac86eaa6d787aa62f223647f59c418def9e2aea9b269da6f801c8e18e89ef28c1b608bc7603671d93826b1d368c4c7b112ba950e3cc2232098652245777ff",
+          "sha256": "09b6c70f1b18fd684c197b9e20f5872368e584a546ef636babdb934509a41949",
+          "sha1": "4a6f82ea3798b5c027e711632b2479ddf793e0f1",
+          "md5": "8c9e502673f3d58bd66b4aff4baa23ba"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold",
+          "version": {
+            "requires": "0.18.1"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-ratelimit-0.18.0-gcp-gcde2b499.jar",
+          "url": "surefold-ratelimit-0.18.0-gcp-gcde2b499.jar",
+          "size": 18679,
+          "sha512": "32bac86eaa6d787aa62f223647f59c418def9e2aea9b269da6f801c8e18e89ef28c1b608bc7603671d93826b1d368c4c7b112ba950e3cc2232098652245777ff",
+          "sha256": "09b6c70f1b18fd684c197b9e20f5872368e584a546ef636babdb934509a41949",
+          "sha1": "4a6f82ea3798b5c027e711632b2479ddf793e0f1",
+          "md5": "8c9e502673f3d58bd66b4aff4baa23ba"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "surefold-ratelimit-0.18.0-gcp-gcde2b499-sources.jar",
+          "url": "surefold-ratelimit-0.18.0-gcp-gcde2b499-sources.jar",
+          "size": 4698,
+          "sha512": "2bf3d1bba98bdf77a92371421a12bffe04a3124b21657011fbf422caf19ce93d75bf374e11e7bd5394b192b636c7330df9cddce362eafe433fca72bbcaeab803",
+          "sha256": "734f34fa8cb19062134ba3448a130d636bad82648b54a53890d46c7323432067",
+          "sha1": "dcfd662378bde4a309be908b9d87be249b04e11b",
+          "md5": "64cf7eafc8473c32402d7156b2e234ec"
+        }
+      ]
+    }
+  ]
+}

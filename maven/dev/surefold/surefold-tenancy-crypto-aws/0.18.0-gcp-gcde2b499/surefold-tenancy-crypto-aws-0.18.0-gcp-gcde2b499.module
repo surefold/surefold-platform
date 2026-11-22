@@ -1,0 +1,165 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "dev.surefold",
+    "module": "surefold-tenancy-crypto-aws",
+    "version": "0.18.0-gcp-gcde2b499",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.7.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold-tenancy-crypto",
+          "version": {
+            "requires": "0.18.0-gcp-gcde2b499"
+          }
+        },
+        {
+          "group": "software.amazon.awssdk",
+          "module": "kms",
+          "version": {
+            "requires": "2.55.6"
+          },
+          "excludes": [
+            {
+              "group": "software.amazon.awssdk",
+              "module": "apache-client"
+            },
+            {
+              "group": "software.amazon.awssdk",
+              "module": "netty-nio-client"
+            },
+            {
+              "group": "software.amazon.awssdk",
+              "module": "apache5-client"
+            }
+          ]
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-tenancy-crypto-aws-0.18.0-gcp-gcde2b499.jar",
+          "url": "surefold-tenancy-crypto-aws-0.18.0-gcp-gcde2b499.jar",
+          "size": 93711,
+          "sha512": "f15b14e8a03efef072d31d2f001f4466c02d1a558ec2b1e02dfaea4cc309300d524fbe833cc87a407a72653c5ad8d8d97c97fca85d92257c7da999f56bf4fc69",
+          "sha256": "3a2132422ce133f2966491707ddbfb1606e8f67231ee54e440865d9648dd789d",
+          "sha1": "80f88a0584a5608e28492c232918e732b6bef3f0",
+          "md5": "04dd01a550d240eaafaa5bb1e24a18a6"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "software.amazon.awssdk",
+          "module": "url-connection-client",
+          "version": {
+            "requires": "2.55.6"
+          }
+        },
+        {
+          "group": "dev.surefold",
+          "module": "surefold-tenancy-crypto",
+          "version": {
+            "requires": "0.18.0-gcp-gcde2b499"
+          }
+        },
+        {
+          "group": "software.amazon.awssdk",
+          "module": "kms",
+          "version": {
+            "requires": "2.55.6"
+          },
+          "excludes": [
+            {
+              "group": "software.amazon.awssdk",
+              "module": "apache-client"
+            },
+            {
+              "group": "software.amazon.awssdk",
+              "module": "netty-nio-client"
+            },
+            {
+              "group": "software.amazon.awssdk",
+              "module": "apache5-client"
+            }
+          ]
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-tenancy-crypto-aws-0.18.0-gcp-gcde2b499.jar",
+          "url": "surefold-tenancy-crypto-aws-0.18.0-gcp-gcde2b499.jar",
+          "size": 93711,
+          "sha512": "f15b14e8a03efef072d31d2f001f4466c02d1a558ec2b1e02dfaea4cc309300d524fbe833cc87a407a72653c5ad8d8d97c97fca85d92257c7da999f56bf4fc69",
+          "sha256": "3a2132422ce133f2966491707ddbfb1606e8f67231ee54e440865d9648dd789d",
+          "sha1": "80f88a0584a5608e28492c232918e732b6bef3f0",
+          "md5": "04dd01a550d240eaafaa5bb1e24a18a6"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "surefold-tenancy-crypto-aws-0.18.0-gcp-gcde2b499-sources.jar",
+          "url": "surefold-tenancy-crypto-aws-0.18.0-gcp-gcde2b499-sources.jar",
+          "size": 18185,
+          "sha512": "fcce45a3784ff8f20e0f94d809b7e504965082b8fbda5c84a962ed5a956a95ca1a23370a01a9415cce196aaafde950a8a4a0eb6fbd2062ad49396df924bb7ac8",
+          "sha256": "8a29e321ac475608e53fba55151921a1d25e513663f777d76128644f5af873be",
+          "sha1": "3ed8ef8a2219c768fe3e9a582bfdbd1ef45247d1",
+          "md5": "cd796b49741fc96debf270a6297edba8"
+        }
+      ]
+    }
+  ]
+}

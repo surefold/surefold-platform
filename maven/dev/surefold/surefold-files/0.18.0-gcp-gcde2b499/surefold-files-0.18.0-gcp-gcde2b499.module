@@ -1,0 +1,294 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "dev.surefold",
+    "module": "surefold-files",
+    "version": "0.18.0-gcp-gcde2b499",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.7.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold",
+          "version": {
+            "requires": "0.18.1"
+          }
+        },
+        {
+          "group": "software.amazon.awssdk",
+          "module": "s3",
+          "version": {
+            "requires": "2.55.6"
+          },
+          "excludes": [
+            {
+              "group": "software.amazon.awssdk",
+              "module": "apache-client"
+            },
+            {
+              "group": "software.amazon.awssdk",
+              "module": "netty-nio-client"
+            },
+            {
+              "group": "software.amazon.awssdk",
+              "module": "apache5-client"
+            }
+          ]
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-files-0.18.0-gcp-gcde2b499.jar",
+          "url": "surefold-files-0.18.0-gcp-gcde2b499.jar",
+          "size": 85778,
+          "sha512": "97973bec038b0c633d41f3a1de819cf6b12dd60b91f2e244724768b22f949220a3273c9e01ddf77e73dc8b83766ace1b6ea36dc29f7b23be24960605efc64068",
+          "sha256": "1a37f3e768be2681b7bb37bcedf1caa17a483651c38747d768c6413c75eb5d54",
+          "sha1": "191c52a3a91b2d9bad0d1c75d529eda4c5b4ddde",
+          "md5": "4ea8c07d832e83757ffabcb51f8e7ca1"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "software.amazon.awssdk",
+          "module": "url-connection-client",
+          "version": {
+            "requires": "2.55.6"
+          }
+        },
+        {
+          "group": "dev.surefold",
+          "module": "surefold",
+          "version": {
+            "requires": "0.18.1"
+          }
+        },
+        {
+          "group": "software.amazon.awssdk",
+          "module": "s3",
+          "version": {
+            "requires": "2.55.6"
+          },
+          "excludes": [
+            {
+              "group": "software.amazon.awssdk",
+              "module": "apache-client"
+            },
+            {
+              "group": "software.amazon.awssdk",
+              "module": "netty-nio-client"
+            },
+            {
+              "group": "software.amazon.awssdk",
+              "module": "apache5-client"
+            }
+          ]
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-files-0.18.0-gcp-gcde2b499.jar",
+          "url": "surefold-files-0.18.0-gcp-gcde2b499.jar",
+          "size": 85778,
+          "sha512": "97973bec038b0c633d41f3a1de819cf6b12dd60b91f2e244724768b22f949220a3273c9e01ddf77e73dc8b83766ace1b6ea36dc29f7b23be24960605efc64068",
+          "sha256": "1a37f3e768be2681b7bb37bcedf1caa17a483651c38747d768c6413c75eb5d54",
+          "sha1": "191c52a3a91b2d9bad0d1c75d529eda4c5b4ddde",
+          "md5": "4ea8c07d832e83757ffabcb51f8e7ca1"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "surefold-files-0.18.0-gcp-gcde2b499-sources.jar",
+          "url": "surefold-files-0.18.0-gcp-gcde2b499-sources.jar",
+          "size": 14010,
+          "sha512": "344729ea0a991d96f4d4baa48385b348d8edb4688d84dc55b3ba3629a691a7992efb5e6e91f7b1af1ee6265b21f3032a2d3d68cd9094ef037f538da02e40abaa",
+          "sha256": "da0f3d6d9361b92fb5ab2cb52c19318970a6fef6a16767f825762f1f632237c6",
+          "sha1": "3afb6bc0a108bfd03b44738156515badedc08275",
+          "md5": "026ebe888c65c732bc6c3b63f6f10e84"
+        }
+      ]
+    },
+    {
+      "name": "testFixturesApiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold-files",
+          "version": {
+            "requires": "0.18.0-gcp-gcde2b499"
+          }
+        },
+        {
+          "group": "dev.surefold",
+          "module": "surefold-junit",
+          "version": {
+            "requires": "0.18.1"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-files-0.18.0-gcp-gcde2b499-test-fixtures.jar",
+          "url": "surefold-files-0.18.0-gcp-gcde2b499-test-fixtures.jar",
+          "size": 9527,
+          "sha512": "c6fe62b9352ac73de7654847418841a8d79af282f9e1932e3141a106eacedc2e4361fac4a5fe365678ce1fb980d69b36d5edd7daf4cec79a953216155df89130",
+          "sha256": "eeb222b5c9cbf5103e0b0c45d936f736e536ab9e39d8135770c19d0a07755bd4",
+          "sha1": "7ea715ba7a451368a7731c1ed2560613a0b8f0b9",
+          "md5": "e2833fd25baec6857abca1a7952d60ca"
+        }
+      ],
+      "capabilities": [
+        {
+          "group": "dev.surefold",
+          "name": "surefold-files-test-fixtures",
+          "version": "0.18.0-gcp-gcde2b499"
+        }
+      ]
+    },
+    {
+      "name": "testFixturesRuntimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold-files",
+          "version": {
+            "requires": "0.18.0-gcp-gcde2b499"
+          }
+        },
+        {
+          "group": "dev.surefold",
+          "module": "surefold-junit",
+          "version": {
+            "requires": "0.18.1"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-files-0.18.0-gcp-gcde2b499-test-fixtures.jar",
+          "url": "surefold-files-0.18.0-gcp-gcde2b499-test-fixtures.jar",
+          "size": 9527,
+          "sha512": "c6fe62b9352ac73de7654847418841a8d79af282f9e1932e3141a106eacedc2e4361fac4a5fe365678ce1fb980d69b36d5edd7daf4cec79a953216155df89130",
+          "sha256": "eeb222b5c9cbf5103e0b0c45d936f736e536ab9e39d8135770c19d0a07755bd4",
+          "sha1": "7ea715ba7a451368a7731c1ed2560613a0b8f0b9",
+          "md5": "e2833fd25baec6857abca1a7952d60ca"
+        }
+      ],
+      "capabilities": [
+        {
+          "group": "dev.surefold",
+          "name": "surefold-files-test-fixtures",
+          "version": "0.18.0-gcp-gcde2b499"
+        }
+      ]
+    },
+    {
+      "name": "testFixturesSourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "surefold-files-0.18.0-gcp-gcde2b499-test-fixtures-sources.jar",
+          "url": "surefold-files-0.18.0-gcp-gcde2b499-test-fixtures-sources.jar",
+          "size": 2552,
+          "sha512": "f1661a017422ca31a2073cfcc118f8f499a3837ee3cb3d14e1a9b4b01de2c385ec5602d8a4c34cb80a9bc5345224424c102ccd71dd83bf6a5ab193d8317943e6",
+          "sha256": "84e6cc3783dab49ec7189f22d832148d799b0585e812d3e7a94005da2f86d961",
+          "sha1": "4d117eaa1337a25d51a6596e4d70012f35dfb428",
+          "md5": "fa735883f9d9890ab1d0d998eb8705e1"
+        }
+      ],
+      "capabilities": [
+        {
+          "group": "dev.surefold",
+          "name": "surefold-files-test-fixtures",
+          "version": "0.18.0-gcp-gcde2b499"
+        }
+      ]
+    }
+  ]
+}

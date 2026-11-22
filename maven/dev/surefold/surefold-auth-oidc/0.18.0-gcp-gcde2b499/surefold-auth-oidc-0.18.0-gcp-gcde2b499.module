@@ -1,0 +1,123 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "dev.surefold",
+    "module": "surefold-auth-oidc",
+    "version": "0.18.0-gcp-gcde2b499",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.7.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold-auth",
+          "version": {
+            "requires": "0.18.0-gcp-gcde2b499"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-auth-oidc-0.18.0-gcp-gcde2b499.jar",
+          "url": "surefold-auth-oidc-0.18.0-gcp-gcde2b499.jar",
+          "size": 9901,
+          "sha512": "8991428d386a2a4c4d4a76140948f6373d0d5c8fd9767e0af3d04721a56fa771c71fd1c63dc1864b6c873cf24b642f3640307df12df712c6695bd511e0a148cc",
+          "sha256": "260e0cae675101cf89b3f3859c3d8123b3fb00fb8cc70451a7438f79008c29d7",
+          "sha1": "257bd32c2c2d5593d8c2a423d6520a0bda8b5536",
+          "md5": "e873afb79263df611921d07f7e273d0a"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "com.nimbusds",
+          "module": "oauth2-oidc-sdk",
+          "version": {
+            "requires": "11.37.2"
+          }
+        },
+        {
+          "group": "dev.surefold",
+          "module": "surefold-auth",
+          "version": {
+            "requires": "0.18.0-gcp-gcde2b499"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-auth-oidc-0.18.0-gcp-gcde2b499.jar",
+          "url": "surefold-auth-oidc-0.18.0-gcp-gcde2b499.jar",
+          "size": 9901,
+          "sha512": "8991428d386a2a4c4d4a76140948f6373d0d5c8fd9767e0af3d04721a56fa771c71fd1c63dc1864b6c873cf24b642f3640307df12df712c6695bd511e0a148cc",
+          "sha256": "260e0cae675101cf89b3f3859c3d8123b3fb00fb8cc70451a7438f79008c29d7",
+          "sha1": "257bd32c2c2d5593d8c2a423d6520a0bda8b5536",
+          "md5": "e873afb79263df611921d07f7e273d0a"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "surefold-auth-oidc-0.18.0-gcp-gcde2b499-sources.jar",
+          "url": "surefold-auth-oidc-0.18.0-gcp-gcde2b499-sources.jar",
+          "size": 3164,
+          "sha512": "4c01edeb13eb49de37e101685321eb2d049289c1257a545d4027eec3798328367d3251f34f42454f7547adf247fbc74ab4bbb24ec21f9e2f19a340ad01ee18b6",
+          "sha256": "3429cc9e27d828362c98bfe4999ec4c3c32894393105cdf17198ddb3f7ef8550",
+          "sha1": "0ec8f925eaf225d0590ab51e59d572ceedfd2fc1",
+          "md5": "a1149923d3071578dbc7afc796708032"
+        }
+      ]
+    }
+  ]
+}

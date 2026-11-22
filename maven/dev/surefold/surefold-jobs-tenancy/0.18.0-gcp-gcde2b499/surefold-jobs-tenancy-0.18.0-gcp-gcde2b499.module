@@ -1,0 +1,130 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "dev.surefold",
+    "module": "surefold-jobs-tenancy",
+    "version": "0.18.0-gcp-gcde2b499",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.7.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold-jobs",
+          "version": {
+            "requires": "0.18.0-gcp-gcde2b499"
+          }
+        },
+        {
+          "group": "dev.surefold",
+          "module": "surefold-tenancy",
+          "version": {
+            "requires": "0.18.0-gcp-gcde2b499"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-jobs-tenancy-0.18.0-gcp-gcde2b499.jar",
+          "url": "surefold-jobs-tenancy-0.18.0-gcp-gcde2b499.jar",
+          "size": 2487,
+          "sha512": "b37be0299c05a624780d41a9c3a5c4d13228610a681709b3069272f9351772f61cc72dfdbaf1e2e6a312c1f9fbfb1116e78f40769c7cbb394573ce6aa565f461",
+          "sha256": "c74a09a067891a35a6086c871add8032838613d057f54ecb135f947ac4ce0852",
+          "sha1": "24dc05067e37615bdaeb774b6f8e3bd7576ed46e",
+          "md5": "efe65ce211d6fa200d09b1807ac7d9fa"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold-jobs",
+          "version": {
+            "requires": "0.18.0-gcp-gcde2b499"
+          }
+        },
+        {
+          "group": "dev.surefold",
+          "module": "surefold-tenancy",
+          "version": {
+            "requires": "0.18.0-gcp-gcde2b499"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-jobs-tenancy-0.18.0-gcp-gcde2b499.jar",
+          "url": "surefold-jobs-tenancy-0.18.0-gcp-gcde2b499.jar",
+          "size": 2487,
+          "sha512": "b37be0299c05a624780d41a9c3a5c4d13228610a681709b3069272f9351772f61cc72dfdbaf1e2e6a312c1f9fbfb1116e78f40769c7cbb394573ce6aa565f461",
+          "sha256": "c74a09a067891a35a6086c871add8032838613d057f54ecb135f947ac4ce0852",
+          "sha1": "24dc05067e37615bdaeb774b6f8e3bd7576ed46e",
+          "md5": "efe65ce211d6fa200d09b1807ac7d9fa"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "surefold-jobs-tenancy-0.18.0-gcp-gcde2b499-sources.jar",
+          "url": "surefold-jobs-tenancy-0.18.0-gcp-gcde2b499-sources.jar",
+          "size": 1614,
+          "sha512": "ec72cca860b8ee1b98f5283428e0e1922db462b0a7a0e08637b530909768c61820568ec0cc07f95f6ef97c3ae776d949752c99198976ae12337de5dfeee8bbf8",
+          "sha256": "87d87d46d3e9731127be2c0fcd2469c1f8766e10ae7661966f8e46fab5123717",
+          "sha1": "5b13db879c2b9abf9883572164bbbd297b127221",
+          "md5": "4197cec9a54a7863fff9ef58d38cf85f"
+        }
+      ]
+    }
+  ]
+}

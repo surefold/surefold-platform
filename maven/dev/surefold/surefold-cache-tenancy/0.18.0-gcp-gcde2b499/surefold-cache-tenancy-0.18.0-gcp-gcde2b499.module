@@ -1,0 +1,130 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "dev.surefold",
+    "module": "surefold-cache-tenancy",
+    "version": "0.18.0-gcp-gcde2b499",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.7.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold-cache",
+          "version": {
+            "requires": "0.18.1"
+          }
+        },
+        {
+          "group": "dev.surefold",
+          "module": "surefold-tenancy",
+          "version": {
+            "requires": "0.18.0-gcp-gcde2b499"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-cache-tenancy-0.18.0-gcp-gcde2b499.jar",
+          "url": "surefold-cache-tenancy-0.18.0-gcp-gcde2b499.jar",
+          "size": 5748,
+          "sha512": "498bc74a8ffdf2857a944c955b23727ac3c1e8ea8be0c62858b5c54cf6e03e6b673b8ad1d14217ec98f3fda506c9ffacea7900c255bb98d86e1b5d3683e464ec",
+          "sha256": "baa8815cc7541f2e9d99e39f5da9a2fcfbcc7cd72cdb225053709b0e12e2bdf0",
+          "sha1": "e49518182ae85aa8a863e1b4409ac2f2b674fd8e",
+          "md5": "16e449c65c7f6889997ef9bb822d85c5"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold-cache",
+          "version": {
+            "requires": "0.18.1"
+          }
+        },
+        {
+          "group": "dev.surefold",
+          "module": "surefold-tenancy",
+          "version": {
+            "requires": "0.18.0-gcp-gcde2b499"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-cache-tenancy-0.18.0-gcp-gcde2b499.jar",
+          "url": "surefold-cache-tenancy-0.18.0-gcp-gcde2b499.jar",
+          "size": 5748,
+          "sha512": "498bc74a8ffdf2857a944c955b23727ac3c1e8ea8be0c62858b5c54cf6e03e6b673b8ad1d14217ec98f3fda506c9ffacea7900c255bb98d86e1b5d3683e464ec",
+          "sha256": "baa8815cc7541f2e9d99e39f5da9a2fcfbcc7cd72cdb225053709b0e12e2bdf0",
+          "sha1": "e49518182ae85aa8a863e1b4409ac2f2b674fd8e",
+          "md5": "16e449c65c7f6889997ef9bb822d85c5"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "surefold-cache-tenancy-0.18.0-gcp-gcde2b499-sources.jar",
+          "url": "surefold-cache-tenancy-0.18.0-gcp-gcde2b499-sources.jar",
+          "size": 1831,
+          "sha512": "145f810bad673f846a55115041559c09ab4a3b7a25cbb6adab935724009a0a9ba0caa2c4596fd433bdc8c0d614459e62da4948cbd16ed278117614b64ac91e29",
+          "sha256": "57d9c3574d5524f6027dd709897b49edae2c2153714d1de701cdf4a27f085e8d",
+          "sha1": "13d3428d5baa9bd331150b86e71a764aa2526592",
+          "md5": "7539ca8c2a668e148ad31f9cd75fb885"
+        }
+      ]
+    }
+  ]
+}

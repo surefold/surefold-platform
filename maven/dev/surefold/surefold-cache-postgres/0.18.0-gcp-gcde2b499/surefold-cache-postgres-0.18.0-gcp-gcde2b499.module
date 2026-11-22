@@ -1,0 +1,130 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "dev.surefold",
+    "module": "surefold-cache-postgres",
+    "version": "0.18.0-gcp-gcde2b499",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.7.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold-cache",
+          "version": {
+            "requires": "0.18.1"
+          }
+        },
+        {
+          "group": "dev.surefold",
+          "module": "surefold-postgres-notify",
+          "version": {
+            "requires": "0.18.0-gcp-gcde2b499"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-cache-postgres-0.18.0-gcp-gcde2b499.jar",
+          "url": "surefold-cache-postgres-0.18.0-gcp-gcde2b499.jar",
+          "size": 2890,
+          "sha512": "306b9129fb0681fdfaae6551710c2574abf6575f73f50e1bb6f2d61f3019d90f4389059f0d0d2e08ad826db73a42f2da149596e5e3a630f78e37a4a5f3625ecb",
+          "sha256": "1cb769df9610effd7d15b4e03ca46c9a325c4b629b74430d463b42cbc21b8d88",
+          "sha1": "41819bae93d221b7fbd21c285a4307d70184af64",
+          "md5": "2549062c0d8008b5d9c0d74d314ebac3"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold-cache",
+          "version": {
+            "requires": "0.18.1"
+          }
+        },
+        {
+          "group": "dev.surefold",
+          "module": "surefold-postgres-notify",
+          "version": {
+            "requires": "0.18.0-gcp-gcde2b499"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-cache-postgres-0.18.0-gcp-gcde2b499.jar",
+          "url": "surefold-cache-postgres-0.18.0-gcp-gcde2b499.jar",
+          "size": 2890,
+          "sha512": "306b9129fb0681fdfaae6551710c2574abf6575f73f50e1bb6f2d61f3019d90f4389059f0d0d2e08ad826db73a42f2da149596e5e3a630f78e37a4a5f3625ecb",
+          "sha256": "1cb769df9610effd7d15b4e03ca46c9a325c4b629b74430d463b42cbc21b8d88",
+          "sha1": "41819bae93d221b7fbd21c285a4307d70184af64",
+          "md5": "2549062c0d8008b5d9c0d74d314ebac3"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "surefold-cache-postgres-0.18.0-gcp-gcde2b499-sources.jar",
+          "url": "surefold-cache-postgres-0.18.0-gcp-gcde2b499-sources.jar",
+          "size": 1434,
+          "sha512": "9e5519ff63906f7c1b0a7c0d566c50b783c03050056a4b1c59149267e9bd44d0dd8e368aeb8fe5e9f9af42c279527e9618f876ade15ea70bb04fe98db0858588",
+          "sha256": "5368806314d2dc46215c633bdc307cb85bf706aecb660f68864fee3ce216ae7c",
+          "sha1": "9bfe93dc044c5457c9ef6665c651a46223af4a5b",
+          "md5": "b367a7de67c5256352cd7d639aba206d"
+        }
+      ]
+    }
+  ]
+}
