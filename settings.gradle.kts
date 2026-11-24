@@ -43,6 +43,7 @@ module("data", "surefold-auth")
 module("data", "surefold-auth-oidc")
 
 module("bench", "surefold-jobs-load")
+module("bench", "surefold-tenancy-crypto-bench")
 
 module("examples", "surefold-bank")
 
