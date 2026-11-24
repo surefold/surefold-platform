@@ -31,9 +31,9 @@ object HandoverSuite : Suite() {
             val source = onLiquibase()
 
             migrate(source, SurefoldSchema.JOBS, service = SERVICE, fromLiquibase = LAST) shouldBe 0
-            withClue("the service starts at V1, its dump; jobs at the script of its last changeset, jobs-operations") {
+            withClue("the service starts at V1, its dump; jobs at the script of its last changeset, jobs-next") {
                 source.history("flyway_schema_history") shouldBe listOf("BASELINE 1")
-                source.history("flyway_surefold_jobs") shouldBe listOf("BASELINE 6")
+                source.history("flyway_surefold_jobs") shouldBe listOf("BASELINE 7")
             }
             source.hasTable("databasechangelog") shouldBe true
 

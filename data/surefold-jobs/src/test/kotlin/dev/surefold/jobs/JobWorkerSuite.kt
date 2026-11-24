@@ -3,11 +3,17 @@ package dev.surefold.jobs
 import dev.surefold.junit.Suite
 import dev.surefold.junit.shouldBe
 import dev.surefold.junit.shouldBeLessThan
+import dev.surefold.junit.withClue
 import dev.surefold.test.eventually
+import java.lang.reflect.Proxy
+import java.sql.Connection
+import java.time.Instant
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import javax.sql.DataSource
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
@@ -79,6 +85,53 @@ object JobWorkerSuite : Suite() {
             }
         }
 
+        test("a worker sleeps until the next job is due, however long its poll") {
+            val source = jobsDatabase()
+            val ran = AtomicBoolean(false)
+            val handlers = JobHandlers.of(
+                Remind.handledBy {
+                    ran.set(true)
+                    JobResult.Done
+                },
+            )
+            source.committed { Jobs.enqueue(it, Remind, "soon", "soon", runAt = Instant.now().plusMillis(300)) }
+            val settings = JobSettings(poll = 10.minutes, minPoll = 50.milliseconds, listen = false)
+            JobWorker(source, handlers, settings).start().use {
+                eventually(within = 2.seconds) { ran.get() shouldBe true }
+            }
+        }
+
+        test("an idle worker claims once a poll, not once a minPoll") {
+            val statements = ConcurrentLinkedQueue<String>()
+            val source = jobsDatabase().noting(statements)
+            val claims = { statements.count { "set status = 'running'" in it } }
+            val settings = JobSettings(poll = 300.milliseconds, minPoll = 20.milliseconds, listen = false)
+            JobWorker(source, JobHandlers.of(Remind.handledBy { JobResult.Done }), settings).start().use {
+                eventually(within = 10.seconds) { (claims() >= 2) shouldBe true }
+                val before = claims()
+                Thread.sleep(1_000)
+                // Two claims a round (remind, and the unhandled kinds), at most one round a poll: 1 s holds four.
+                withClue("claims in 1 s") { claims() - before shouldBeLessThan 9 }
+            }
+        }
+
+        test("a due job a rate holds back costs a round a minPoll, never a busy loop") {
+            val statements = ConcurrentLinkedQueue<String>()
+            val source = jobsDatabase().noting(statements)
+            val limited = object : JobKind<String>("limited", Notes, rate = JobRate(1, per = 10.minutes)) {}
+            source.committed { connection -> (1..2).forEach { Jobs.enqueue(connection, limited, "$it", "$it") } }
+            val settings = JobSettings(poll = 10.minutes, minPoll = 50.milliseconds, listen = false)
+            JobWorker(source, JobHandlers.of(limited.handledBy { JobResult.Done }), settings).start().use {
+                eventually(within = 10.seconds) {
+                    source.column("select count(*) from surefold_jobs_history") shouldBe listOf(1L)
+                }
+                val before = statements.size
+                Thread.sleep(1_000)
+                // A round is at most five statements: the bucket's three, the unhandled claim, the next run time.
+                withClue("statements in 1 s") { statements.size - before shouldBeLessThan 5 * (1_000 / 50 + 2) }
+            }
+        }
+
         test("a worker fails a job of a kind it has no handler for") {
             val source = jobsDatabase()
             source.committed { Jobs.enqueue(it, Remind, "call sam", "sam") }
@@ -139,4 +192,18 @@ object JobWorkerSuite : Suite() {
             eventually(within = 5.seconds) { interrupted.get() shouldBe true }
         }
     }
+}
+
+/** This source, noting in [sql] what every statement prepared on it runs. */
+private fun DataSource.noting(sql: MutableCollection<String>): DataSource {
+    val loader = JobWorkerSuite::class.java.classLoader
+    val source = this
+    return Proxy.newProxyInstance(loader, arrayOf(DataSource::class.java)) { _, method, args ->
+        val made = method.invoke(source, *args.orEmpty())
+        if (made !is Connection) return@newProxyInstance made
+        Proxy.newProxyInstance(loader, arrayOf(Connection::class.java)) { _, call, given ->
+            if (call.name == "prepareStatement") sql += given[0] as String
+            call.invoke(made, *given.orEmpty())
+        }
+    } as DataSource
 }
