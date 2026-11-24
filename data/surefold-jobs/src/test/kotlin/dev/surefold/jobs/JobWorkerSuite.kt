@@ -132,6 +132,30 @@ object JobWorkerSuite : Suite() {
             }
         }
 
+        test("a job of another kind due while a kind refills runs when due, not at the poll cap") {
+            val source = jobsDatabase()
+            val busy = object : JobKind<String>("busy", Notes, concurrency = 1) {}
+            val other = object : JobKind<String>("other", Notes, concurrency = 1) {}
+            val handlers = JobHandlers.of(
+                busy.handledBy {
+                    Thread.sleep(5)
+                    JobResult.Done
+                },
+                other.handledBy { JobResult.Done },
+            )
+            source.committed { connection -> (1..2000).forEach { Jobs.enqueue(connection, busy, "$it", "$it") } }
+            val settings = JobSettings(poll = 10.minutes, minPoll = 50.milliseconds, listen = false)
+            JobWorker(source, handlers, settings).start().use {
+                source.committed { connection ->
+                    Jobs.enqueue(connection, other, "late", "late", runAt = java.time.Instant.now().plusMillis(300))
+                }
+                eventually(within = 3.seconds) {
+                    source.column("select status from surefold_jobs_history where kind = 'other'") shouldBe
+                        listOf("done")
+                }
+            }
+        }
+
         test("a worker fails a job of a kind it has no handler for") {
             val source = jobsDatabase()
             source.committed { Jobs.enqueue(it, Remind, "call sam", "sam") }

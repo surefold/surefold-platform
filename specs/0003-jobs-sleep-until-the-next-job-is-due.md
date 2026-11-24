@@ -30,6 +30,8 @@ and sleeps `clamp(earliest - now, minPoll, poll)`; with no pending job, `poll`. 
 meaning unchanged: the longest a job enqueued later without a `NOTIFY` can wait, and #26's every-kind floor.
 
 - `LISTEN` still wakes the worker at once, and #26's refills still claim as runs end.
+- Every kind is claimed for by the next planned wake: a refill round recomputes it, so a busy kind's refills never
+  push another kind's due job out to `poll`.
 - A sleep that ends by itself claims for every kind, as one that ran its whole `poll` did.
 - A due job nobody can claim makes `earliest <= now`, so the worker sleeps `minPoll`: never a busy loop.
   `minPoll` must be positive.
