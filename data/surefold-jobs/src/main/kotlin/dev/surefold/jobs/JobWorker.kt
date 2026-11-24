@@ -119,6 +119,8 @@ class JobWorker(
 
     private fun polling() {
         var housekeepingDue = clock.get().now()
+        // Refills alone must not hold off the other kinds: every kind is claimed for at least once a poll interval.
+        var everyKindDue = clock.get().now()
         while (true) {
             try {
                 if (clock.get().now() >= housekeepingDue) {
@@ -128,7 +130,10 @@ class JobWorker(
                     measureBacklog()
                     housekeepingDue = clock.get().now() + settings.housekeeping.toJavaDuration()
                 }
-                claimAndRun(if (lock.withLock { everyKind.also { everyKind = false } }) null else refill.toSet())
+                val now = clock.get().now()
+                val all = lock.withLock { (everyKind || now >= everyKindDue).also { everyKind = false } }
+                if (all) everyKindDue = now + settings.poll.toJavaDuration()
+                claimAndRun(if (all) null else refill.toSet())
             } catch (failed: SQLException) {
                 logWarn("surefold-jobs: worker $name could not reach the jobs table, and will try again: $failed")
             }
