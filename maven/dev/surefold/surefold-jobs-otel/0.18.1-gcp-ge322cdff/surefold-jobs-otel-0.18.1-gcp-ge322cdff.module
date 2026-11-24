@@ -1,0 +1,130 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "dev.surefold",
+    "module": "surefold-jobs-otel",
+    "version": "0.18.1-gcp-ge322cdff",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.7.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold-jobs",
+          "version": {
+            "requires": "0.18.1-gcp-ge322cdff"
+          }
+        },
+        {
+          "group": "dev.surefold",
+          "module": "surefold-otel",
+          "version": {
+            "requires": "0.18.0"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-jobs-otel-0.18.1-gcp-ge322cdff.jar",
+          "url": "surefold-jobs-otel-0.18.1-gcp-ge322cdff.jar",
+          "size": 4210,
+          "sha512": "8394c0cba91aaf6aa002d5fb6393328afaf7c2ec067843695c463121b485aef1f4db6cf4e3c98648b86ad2d02145184ba52511de6d367d7d7c3d32ef2c203376",
+          "sha256": "5a190b93bb3e419f7fe18da4ae8a435278fb6b8197d4f9c4e7e4d4f9bf819373",
+          "sha1": "f809283a4f0569250c2b593343f60200b3b78551",
+          "md5": "494ccccfbf3414b51a048cfcd2e36404"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold-jobs",
+          "version": {
+            "requires": "0.18.1-gcp-ge322cdff"
+          }
+        },
+        {
+          "group": "dev.surefold",
+          "module": "surefold-otel",
+          "version": {
+            "requires": "0.18.0"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-jobs-otel-0.18.1-gcp-ge322cdff.jar",
+          "url": "surefold-jobs-otel-0.18.1-gcp-ge322cdff.jar",
+          "size": 4210,
+          "sha512": "8394c0cba91aaf6aa002d5fb6393328afaf7c2ec067843695c463121b485aef1f4db6cf4e3c98648b86ad2d02145184ba52511de6d367d7d7c3d32ef2c203376",
+          "sha256": "5a190b93bb3e419f7fe18da4ae8a435278fb6b8197d4f9c4e7e4d4f9bf819373",
+          "sha1": "f809283a4f0569250c2b593343f60200b3b78551",
+          "md5": "494ccccfbf3414b51a048cfcd2e36404"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "surefold-jobs-otel-0.18.1-gcp-ge322cdff-sources.jar",
+          "url": "surefold-jobs-otel-0.18.1-gcp-ge322cdff-sources.jar",
+          "size": 1981,
+          "sha512": "ad63ee52e9e204f89febe22fe7f022e6101a3de21f38352787d1003f562b9b8b085e22571c4aab27f84fa36b21e1cf81eb1dffef4eac0bb53d18d6c306c45429",
+          "sha256": "9ffd080d7583ebb47a78f0d3960dd3617d98bc0198e6df9a629221ccca065a21",
+          "sha1": "40ba28ed81ea6e34be00c274cf931270c40cec45",
+          "md5": "7bd654ccaf5257d821412b2e1da43733"
+        }
+      ]
+    }
+  ]
+}

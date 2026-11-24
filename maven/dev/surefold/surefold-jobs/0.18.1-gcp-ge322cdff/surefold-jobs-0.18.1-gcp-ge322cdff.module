@@ -1,0 +1,130 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "dev.surefold",
+    "module": "surefold-jobs",
+    "version": "0.18.1-gcp-ge322cdff",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.7.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold",
+          "version": {
+            "requires": "0.18.1"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-jobs-0.18.1-gcp-ge322cdff.jar",
+          "url": "surefold-jobs-0.18.1-gcp-ge322cdff.jar",
+          "size": 112976,
+          "sha512": "a150be1a16ea7d075622af1fe5ac5a17893a4e2a44b1b60c819e5efc71c7177a9cca986ca123a9fadfb76783d3c34b87bcbe9d1f4c066cf1f21d660ccb392bbe",
+          "sha256": "0e9ad593f29e5a81ec3ddc8234714077e9c0834cab878fa0096a3fb83a617adb",
+          "sha1": "a510aab4cdee04eed69dab7b1960a9294e785a76",
+          "md5": "c605b77f29365f71d0e4a730666e9951"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 25,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "dev.surefold",
+          "module": "surefold-postgres-notify",
+          "version": {
+            "requires": "0.18.1-gcp-ge322cdff"
+          }
+        },
+        {
+          "group": "dev.surefold",
+          "module": "surefold-stream-forks",
+          "version": {
+            "requires": "0.18.1"
+          }
+        },
+        {
+          "group": "dev.surefold",
+          "module": "surefold",
+          "version": {
+            "requires": "0.18.1"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "surefold-jobs-0.18.1-gcp-ge322cdff.jar",
+          "url": "surefold-jobs-0.18.1-gcp-ge322cdff.jar",
+          "size": 112976,
+          "sha512": "a150be1a16ea7d075622af1fe5ac5a17893a4e2a44b1b60c819e5efc71c7177a9cca986ca123a9fadfb76783d3c34b87bcbe9d1f4c066cf1f21d660ccb392bbe",
+          "sha256": "0e9ad593f29e5a81ec3ddc8234714077e9c0834cab878fa0096a3fb83a617adb",
+          "sha1": "a510aab4cdee04eed69dab7b1960a9294e785a76",
+          "md5": "c605b77f29365f71d0e4a730666e9951"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "surefold-jobs-0.18.1-gcp-ge322cdff-sources.jar",
+          "url": "surefold-jobs-0.18.1-gcp-ge322cdff-sources.jar",
+          "size": 26435,
+          "sha512": "55629c290e0f4584bfdd2a748304af70929d317500c0c90060a841b04d4d54d64f7aa5e71092539bf3c04587c305998ea7ed9d39ce5d12dd26b4fe2ef1a20cf4",
+          "sha256": "ce081fdfffaf666d4bd68cec038a9c675d65bc7f84d09a164807ab214232db30",
+          "sha1": "2352ee6963d14ae09e9b578b21567cb1d4fe7346",
+          "md5": "fff397664682a5d659318b4e7557db68"
+        }
+      ]
+    }
+  ]
+}
