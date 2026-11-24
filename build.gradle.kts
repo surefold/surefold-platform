@@ -124,7 +124,7 @@ val moduleDescriptions = mapOf(
 )
 
 // Measured, not tested: a benchmark has no assertions for a coverage floor to count.
-val benchmarkModules = setOf("surefold-jobs-load")
+val benchmarkModules = setOf("surefold-jobs-load", "surefold-tenancy-crypto-bench")
 
 // Built and tested, never published: surefold-bank is an application to run, not a library to depend on (surefold-core's
 // spec 0094).
