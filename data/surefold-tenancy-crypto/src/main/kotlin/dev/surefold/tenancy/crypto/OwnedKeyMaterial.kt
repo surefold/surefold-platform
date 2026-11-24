@@ -19,7 +19,7 @@ internal class OwnedKeyMaterial private constructor(
         val zeroed: Boolean = false,
         val notified: Boolean = false,
         val views: Set<Any> = emptySet(),
-        val uses: Map<Any, ByteArray?> = emptyMap(),
+        val uses: Map<Any, ByteArray> = emptyMap(),
     )
 
     private val state = Shared(State())
@@ -58,22 +58,19 @@ internal class OwnedKeyMaterial private constructor(
     private fun <A> use(id: Any, clock: Clock, block: (ByteArray) -> A): Either<KeyError, A> = resourceScope {
         refused(clock, id)?.let { return@resourceScope Either.Left(it) }
         val token = Any()
-        var working: ByteArray? = null
+        // Copied before admission, so the use registers in one step (spec 0004). The source is zeroed only after the
+        // state says revoked or zeroed, neither is ever unset, and an admission that commits saw neither.
+        val copy = source.copyOf()
+        // Removed whatever the registration answered: a commit whose instrumentation then throws still registered.
         onRelease { _ ->
-            working?.fill(0)
+            copy.fill(0)
             change { it.copy(uses = it.uses - token) }
         }
-        val admitted = modify {
+        val registered = modify {
             if (it.revoked || it.zeroed || id !in it.views) it to false
-            else it.copy(uses = it.uses + (token to null)) to true
+            else it.copy(uses = it.uses + (token to copy)) to true
         }
-        if (!admitted) return@resourceScope Either.Left(denied)
-        val copy = source.copyOf()
-        working = copy
-        val published = modify {
-            if (it.revoked) it to false else it.copy(uses = it.uses + (token to copy)) to true
-        }
-        if (!published) return@resourceScope Either.Left(denied)
+        if (!registered) return@resourceScope Either.Left(denied)
         refused(clock)?.let { return@resourceScope Either.Left(it) }
         val answer = block(copy)
         refused(clock)?.let { return@resourceScope Either.Left(it) }
@@ -105,7 +102,7 @@ internal class OwnedKeyMaterial private constructor(
     private fun releaseTerminal() {
         val current = state.peek()
         if (current.zeroed || current.revoked) source.fill(0)
-        if (current.revoked) current.uses.values.forEach { it?.fill(0) }
+        if (current.revoked) current.uses.values.forEach { it.fill(0) }
         val terminal = current.zeroed || (current.revoked && current.uses.isEmpty())
         if (terminal && !current.notified) {
             onTerminal()
