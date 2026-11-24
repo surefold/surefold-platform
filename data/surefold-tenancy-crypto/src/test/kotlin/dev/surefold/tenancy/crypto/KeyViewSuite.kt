@@ -330,12 +330,9 @@ object KeyViewSuite : Suite() {
             cutoffBeforeBody(commit = 0, revoke = false)
         }
 
-        test("expiry during working-copy publication refuses before the callback") {
-            cutoffBeforeBody(commit = 1, revoke = false)
-        }
-
-        test("revocation during working-copy publication refuses before the callback") {
-            cutoffBeforeBody(commit = 1, revoke = true)
+        // A use registers in one step (spec 0004), so the cutoff falls on that step: there is no publication after it.
+        test("revocation during use admission refuses before the callback") {
+            cutoffBeforeBody(commit = 0, revoke = true)
         }
 
         test("independent held views close without releasing each other's material") {

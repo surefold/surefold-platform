@@ -13,7 +13,7 @@ import dev.surefold.resourceScope
  */
 object KeyViewUseCostSuite : Suite() {
     // Lowered by each entry of spec 0004 as the use path sheds steps; never raised.
-    private const val STEPS_ALLOWED = 4.0
+    private const val STEPS_ALLOWED = 3.0
 
     init {
         test("one use of a held key view commits no more steps than spec 0004 allows") {
