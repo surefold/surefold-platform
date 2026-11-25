@@ -9,6 +9,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
 
@@ -38,6 +39,44 @@ object JobWorkerSuite : Suite() {
                 }
             }
             most.get() shouldBe 3
+        }
+
+        test("a kind that fills its room claims again as a run ends, without waiting for the next poll") {
+            val source = jobsDatabase()
+            val one = object : JobKind<String>("one", Notes, concurrency = 1) {}
+            val handlers = JobHandlers.of(one.handledBy { JobResult.Done })
+            source.committed { connection -> (1..20).forEach { Jobs.enqueue(connection, one, "$it", "$it") } }
+            // One poll at start and none after: only claims made as runs end can drain the other nineteen.
+            JobWorker(source, handlers, JobSettings(poll = 10.minutes, listen = false)).start().use {
+                eventually(within = 30.seconds) {
+                    source.column("select count(*) from surefold_jobs_history where status = 'done'") shouldBe
+                        listOf(20L)
+                }
+            }
+        }
+
+        test("claims made as runs end never hold off another kind past a poll") {
+            val source = jobsDatabase()
+            val busy = object : JobKind<String>("busy", Notes, concurrency = 1) {}
+            val other = object : JobKind<String>("other", Notes, concurrency = 1) {}
+            val handlers = JobHandlers.of(
+                busy.handledBy {
+                    Thread.sleep(5)
+                    JobResult.Done
+                },
+                other.handledBy { JobResult.Done },
+            )
+            source.committed { connection -> (1..2000).forEach { Jobs.enqueue(connection, busy, "$it", "$it") } }
+            JobWorker(source, handlers, JobSettings(poll = 200.milliseconds, listen = false)).start().use {
+                // Due after the first poll, so only a later full round can claim it while busy keeps refilling.
+                source.committed { connection ->
+                    Jobs.enqueue(connection, other, "late", "late", runAt = java.time.Instant.now().plusMillis(300))
+                }
+                eventually(within = 3.seconds) {
+                    source.column("select status from surefold_jobs_history where kind = 'other'") shouldBe
+                        listOf("done")
+                }
+            }
         }
 
         test("a worker fails a job of a kind it has no handler for") {

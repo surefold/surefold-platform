@@ -70,11 +70,17 @@ class JobWorker(
     private val running = handlers.byName.keys.associateWith { AtomicInteger() }
     private val inFlight = ConcurrentHashMap.newKeySet<CompletableFuture<*>>()
 
+    // Kinds whose last claim took all their room, and those of them a run has left room in since: these claim again
+    // as soon as a run ends, so a kind whose jobs come due later drains faster than its concurrency a poll.
+    private val full = ConcurrentHashMap.newKeySet<String>()
+    private val refill = ConcurrentHashMap.newKeySet<String>()
+
     // The loop sleeps between polls; close interrupts it only while it sleeps, never in the middle of a query.
     private val lock = ReentrantLock()
     private var stopping = false
     private var sleeping: Thread? = null
     private var woken = false
+    private var everyKind = true
 
     @Volatile
     private var listener: Running<Nothing, Unit>? = null
@@ -100,7 +106,7 @@ class JobWorker(
             .delayed { _, delay -> minOf(delay, 30.seconds) }
             .jittered(min = 0.5, max = 1.0)
         return PostgresNotifications.listen(source, setOf(CHANNEL), reconnect)
-            .runFold(Unit) { _, _ -> wake() }
+            .runFold(Unit) { _, _ -> wake(everyKind = true) }
             .start(Forks())
             .also { running ->
                 running.exit.thenAccept { exit ->
@@ -113,6 +119,8 @@ class JobWorker(
 
     private fun polling() {
         var housekeepingDue = clock.get().now()
+        // Refills alone must not hold off the other kinds: every kind is claimed for at least once a poll interval.
+        var everyKindDue = clock.get().now()
         while (true) {
             try {
                 if (clock.get().now() >= housekeepingDue) {
@@ -122,7 +130,10 @@ class JobWorker(
                     measureBacklog()
                     housekeepingDue = clock.get().now() + settings.housekeeping.toJavaDuration()
                 }
-                claimAndRun()
+                val now = clock.get().now()
+                val all = lock.withLock { (everyKind || now >= everyKindDue).also { everyKind = false } }
+                if (all) everyKindDue = now + settings.poll.toJavaDuration()
+                claimAndRun(if (all) null else refill.toSet())
             } catch (failed: SQLException) {
                 logWarn("surefold-jobs: worker $name could not reach the jobs table, and will try again: $failed")
             }
@@ -143,6 +154,7 @@ class JobWorker(
         }
         try {
             clock.get().sleep(settings.poll)
+            lock.withLock { everyKind = true }
         } catch (_: InterruptedException) {
             // Woken by close, or by a job enqueued to run now.
         } finally {
@@ -155,9 +167,13 @@ class JobWorker(
         }
     }
 
-    /** Ends the loop's sleep, or makes its next one end at once: a job is due now. */
-    private fun wake() = lock.withLock {
+    /**
+     * Ends the loop's sleep, or makes its next one end at once: a job is due now, of any kind when [everyKind], or else
+     * of a kind in [refill].
+     */
+    private fun wake(everyKind: Boolean) = lock.withLock {
         woken = true
+        if (everyKind) this.everyKind = true
         sleeping?.interrupt()
     }
 
@@ -174,16 +190,27 @@ class JobWorker(
         }
     }
 
-    /** Claims what each kind has room for, and the jobs of kinds nothing here handles, and runs them. */
-    internal fun claimAndRun(): Int {
-        val claimed = handlers.byName.values.flatMap { handled ->
-            val room = handled.kind.concurrency - running.getValue(handled.kind.name).get()
+    /**
+     * Claims what each kind has room for, and the jobs of kinds nothing here handles, and runs them. With [only], it
+     * claims for those kinds alone.
+     */
+    internal fun claimAndRun(only: Set<String>? = null): Int {
+        val kinds = handlers.byName.values.filter { only == null || it.kind.name in only }
+        val claimed = kinds.flatMap { handled ->
+            val name = handled.kind.name
+            refill -= name
+            val room = handled.kind.concurrency - running.getValue(name).get()
             if (room <= 0) {
                 emptyList()
             } else {
                 queue.claim(room, lease(handled.kind.deadline), Kinds.Only(handled.kind), settings.perTenant)
+                    .also { if (it.size == room) full += name }
             }
-        } + queue.claim(UNHANDLED_BATCH, lease(ZERO), Kinds.Except(handlers.byName.keys), settings.perTenant)
+        } + if (only == null) {
+            queue.claim(UNHANDLED_BATCH, lease(ZERO), Kinds.Except(handlers.byName.keys), settings.perTenant)
+        } else {
+            emptyList()
+        }
         claimed.forEach(::dispatch)
         return claimed.size
     }
@@ -198,6 +225,10 @@ class JobWorker(
                 logWarn("surefold-jobs: job ${job.id} ran, but its result could not be written: $failed")
             } finally {
                 count?.decrementAndGet()
+                if (full.remove(job.kind)) {
+                    refill += job.kind
+                    wake(everyKind = false)
+                }
             }
         }
         inFlight += future
