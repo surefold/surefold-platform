@@ -31,22 +31,31 @@ import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.DurationUnit
 import kotlin.time.toJavaDuration
+import kotlin.time.toKotlinDuration
 
 /**
  * How a [JobWorker] runs. A run's lease is its kind's deadline plus [leaseMargin], so a worker that is slow to write
  * its result back is not mistaken for a dead one. With [perTenant], a claim takes at most that many of one tenant's
  * jobs, so one tenant's burst does not hold every other tenant's jobs behind it. With [listen], a worker holds one
- * connection that `LISTEN`s for jobs enqueued to run now, and claims them without waiting for the next poll.
+ * connection that `LISTEN`s for jobs enqueued to run now, and claims them without waiting for the next poll. With a
+ * [minPoll] below [poll], a worker sleeps until the next pending job is due, at least [minPoll] and at most [poll]
+ * (spec 0003).
  */
 data class JobSettings(
     val poll: Duration = 1.seconds,
+    val minPoll: Duration = poll,
     val leaseMargin: Duration = 30.seconds,
     val drain: Duration = 30.seconds,
     val housekeeping: Duration = 1.minutes,
     val retention: Duration = 7.days,
     val perTenant: Int? = null,
     val listen: Boolean = true,
-)
+) {
+    init {
+        // A due job nobody can claim would otherwise make the worker claim in a busy loop.
+        require(minPoll > ZERO) { "A job worker's minPoll must be positive, not $minPoll." }
+    }
+}
 
 /**
  * Claims due jobs every [JobSettings.poll], up to each kind's concurrency, and runs each on a virtual thread with the
@@ -119,9 +128,10 @@ class JobWorker(
 
     private fun polling() {
         var housekeepingDue = clock.get().now()
-        // Refills alone must not hold off the other kinds: every kind is claimed for at least once a poll interval.
+        // Refills alone must not hold off the other kinds: every kind is claimed for by the next planned wake.
         var everyKindDue = clock.get().now()
         while (true) {
+            var sleep = settings.poll
             try {
                 if (clock.get().now() >= housekeepingDue) {
                     queue.sweep()
@@ -132,17 +142,28 @@ class JobWorker(
                 }
                 val now = clock.get().now()
                 val all = lock.withLock { (everyKind || now >= everyKindDue).also { everyKind = false } }
-                if (all) everyKindDue = now + settings.poll.toJavaDuration()
                 claimAndRun(if (all) null else refill.toSet())
+                sleep = untilDue()
+                // The next round for every kind is the next planned wake, which refill wakes cannot postpone.
+                val wake = clock.get().now() + sleep.toJavaDuration()
+                if (all || wake < everyKindDue) everyKindDue = wake
             } catch (failed: SQLException) {
                 logWarn("surefold-jobs: worker $name could not reach the jobs table, and will try again: $failed")
             }
-            if (!pause()) return
+            if (!pause(sleep)) return
         }
     }
 
-    /** Sleeps until the next poll, and answers false once the worker is closing. */
-    private fun pause(): Boolean {
+    /** Until the next pending job is due, within [JobSettings.minPoll] and [JobSettings.poll]: no query when equal. */
+    private fun untilDue(): Duration {
+        if (settings.minPoll >= settings.poll) return settings.poll
+        val next = queue.nextDue() ?: return settings.poll
+        return java.time.Duration.between(clock.get().now(), next).toKotlinDuration()
+            .coerceIn(settings.minPoll, settings.poll)
+    }
+
+    /** Sleeps for [sleep], and answers false once the worker is closing. */
+    private fun pause(sleep: Duration): Boolean {
         lock.withLock {
             if (stopping) return false
             // A notification that came while the loop was claiming means claim again now.
@@ -153,7 +174,7 @@ class JobWorker(
             sleeping = Thread.currentThread()
         }
         try {
-            clock.get().sleep(settings.poll)
+            clock.get().sleep(sleep)
             lock.withLock { everyKind = true }
         } catch (_: InterruptedException) {
             // Woken by close, or by a job enqueued to run now.

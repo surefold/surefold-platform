@@ -237,6 +237,16 @@ internal class Queue(private val source: DataSource, private val worker: String)
         }
     }
 
+    /** When the earliest pending job of any kind is due, or null when none is pending. */
+    fun nextDue(): Instant? = source.connection.use { connection ->
+        connection.createStatement().use { statement ->
+            statement.executeQuery("select min(run_at) from surefold_jobs where status = 'pending'").use { rows ->
+                rows.next()
+                rows.instant("min")
+            }
+        }
+    }
+
     /** Deletes history that finished more than [retention] ago, and answers how many rows. */
     fun prune(retention: Duration): Int = source.connection.use { connection ->
         connection.prepareStatement("delete from surefold_jobs_history where finished_at < ?").use { statement ->

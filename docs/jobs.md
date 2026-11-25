@@ -187,6 +187,7 @@ The audit row in `surefold_jobs_operations` is kept after the job's history is p
 | Setting | Default | What it does |
 |---|---|---|
 | `poll` | 1s | how often the worker claims due jobs |
+| `minPoll` | `poll` | set below `poll`, the worker sleeps until the next pending job is due, at least this and at most `poll`, so a long `poll` costs few queries when idle without making a job due soon late |
 | `leaseMargin` | 30s | a run's lease is its kind's deadline plus this |
 | `drain` | 30s | how long release waits for runs in flight |
 | `housekeeping` | 1m | how often expired leases are swept, history pruned and the backlog measured |
